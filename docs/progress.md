@@ -85,6 +85,7 @@
 
 ### 一期 (MVP 补齐)
 - [ ] Claude Code 真实对话中触发 hook (settings.json 已注册, 需实际触发)
+- [ ] npm 账号注册 + 登录 + 发布 (`codebrain` 包名可用)
 
 ### 二期
 - [ ] 任务③ 规则归纳
