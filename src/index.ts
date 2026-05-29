@@ -1,0 +1,18 @@
+export { CodeBrainEngine } from './core/codebrain-engine';
+export { MatchEngine } from './core/match-engine';
+export { AIAnalyzer } from './core/ai-analyzer';
+export { MemoryIndex } from './core/memory-index';
+export { preprocess, createErrorEvent, extractErrorCode, extractSourceFile } from './core/preprocessor';
+export { SQLiteStore } from './storage/sqlite-store';
+export { StorageEngine, getDefaultDbPath } from './storage/storage-engine';
+export { XenovaEmbeddingProvider } from './providers/xenova-embedding';
+export { DeepSeekProvider } from './providers/deepseek-provider';
+export { loadConfig } from './config';
+export { ClaudeCodeAdapter } from './adapters/claude-code/adapter';
+export { register, unregister } from './adapters/claude-code/register';
+export { startDaemon, stopDaemon, getDaemonPort } from './daemon/server';
+export type { AgentAdapter, AdapterFactory } from './adapters/base-adapter';
+export type { CodeBrainConfig } from './config';
+export type { EmbeddingProvider } from './providers/embedding-provider';
+export type { LLMProvider } from './providers/llm-provider';
+export type * from './core/types';

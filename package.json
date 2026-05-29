@@ -1,0 +1,30 @@
+{
+  "name": "codebrain",
+  "version": "0.1.0",
+  "description": "系统级 AI 编码 Agent 自进化错误记忆框架",
+  "bin": {
+    "codebrain": "./dist/cli/index.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc && cp -r src/webui dist/webui 2>/dev/null; mkdir -p dist/webui && cp src/webui/index.html dist/webui/",
+    "dev": "tsc --watch",
+    "start": "node dist/cli/index.js"
+  },
+  "dependencies": {
+    "@types/figlet": "^1.7.0",
+    "@xenova/transformers": "^2.17.0",
+    "figlet": "^1.11.0",
+    "sql.js": "^1.11.0",
+    "yaml": "^2.6.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.0"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "MIT"
+}
