@@ -1,0 +1,15 @@
+# Source files (only dist/ is published)
+src/
+docs/
+webui/
+node_modules/
+
+# Test files
+dist/test-integration.*
+
+# Config
+tsconfig.json
+.gitignore
+
+# CI
+.github/
