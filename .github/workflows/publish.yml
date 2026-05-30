@@ -26,7 +26,7 @@ jobs:
         run: |
           cat > .npmrc << EOF
           registry=https://registry.npmjs.org/
-          //registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}
+          //registry.npmjs.org/:_authToken=${{ secrets.publish_token }}
           EOF
 
       - name: Debug auth
