@@ -1,6 +1,6 @@
 {
-  "name": "codebrain",
-  "version": "0.1.0",
+  "name": "@bsawang/codebrain",
+  "version": "0.1.1",
   "description": "系统级 AI 编码 Agent 自进化错误记忆框架",
   "keywords": [
     "ai",
@@ -18,7 +18,10 @@
   },
   "homepage": "https://github.com/bsawang/codeBrain#readme",
   "bin": {
-    "codebrain": "./dist/cli/index.js"
+    "codebrain": "dist/cli/index.js"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -27,7 +30,7 @@
     "README.md"
   ],
   "scripts": {
-    "build": "tsc && node -e \"var f=require('fs'),p=require('path');f.mkdirSync('dist/webui',{recursive:true});f.copyFileSync('src/webui/index.html','dist/webui/index.html')\"",
+    "build": "tsc && node -e \"var f=require('fs'),p=require('path');f.mkdirSync('dist/webui',{recursive:true});f.copyFileSync('src/webui/index.html','dist/webui/index.html')\" && node -e \"['dist/test-integration.js','dist/test-integration.js.map','dist/test-integration.d.ts'].forEach(x=>{try{require('fs').unlinkSync(x)}catch(e){}})\"",
     "dev": "tsc --watch",
     "start": "node dist/cli/index.js",
     "prepublishOnly": "npm run build"

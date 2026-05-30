@@ -5,7 +5,9 @@ webui/
 node_modules/
 
 # Test files
-dist/test-integration.*
+dist/test-integration.js
+dist/test-integration.js.map
+dist/test-integration.d.ts
 
 # Config
 tsconfig.json

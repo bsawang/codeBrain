@@ -3,6 +3,10 @@
  * Claude Code hook（轻量 relay）。
  * PostToolUse → 解析 payload → POST 到 daemon → 返回 additionalContext。
  * Daemon 未运行时自动启动并等待就绪。
+ *
+ * stdin 读取使用事件驱动 + 防抖方式，不等待 EOF。
+ * 因为 Claude Code 的 hook 协议不保证在发送 payload 后关闭 stdin 管道，
+ * 使用 for-await-of 等待 EOF 会造成死锁。
  */
 import { spawn } from 'child_process';
 import { readFileSync } from 'fs';
@@ -52,14 +56,60 @@ async function callDaemon(port: number, body: Record<string, unknown>): Promise<
   return resp.json() as Promise<{ injected: string | null }>;
 }
 
+/**
+ * 安全读取 stdin。
+ *
+ * 不使用 for-await-of（会等待 EOF）而是用 data 事件 + 防抖。
+ * Claude Code 将 hook payload 作为一次性 JSON 写入 stdin，
+ * 最后一个 chunk 到达后 100ms 内无新数据即认为接收完毕。
+ *
+ * 兜底：最长等待 30s（防止极端情况永久阻塞）。
+ */
+function readStdin(): Promise<string> {
+  return new Promise((resolve) => {
+    // TTY 模式：非管道，无输入
+    if (process.stdin.isTTY) {
+      resolve('');
+      return;
+    }
+
+    let data = '';
+    let settled = false;
+    let timer: ReturnType<typeof setTimeout>;
+
+    const done = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      process.stdin.removeAllListeners('data');
+      process.stdin.removeAllListeners('end');
+      process.stdin.pause();
+      resolve(data.trim());
+    };
+
+    process.stdin.setEncoding('utf8');
+    process.stdin.on('data', (chunk: string) => {
+      data += chunk;
+      // 每次收到数据重置防抖，Claude 将 JSON 作为一次 burst 发送
+      clearTimeout(timer);
+      timer = setTimeout(done, 100);
+    });
+    process.stdin.on('end', () => {
+      // 如果 stdin 正常关闭（理想情况），立即完成
+      clearTimeout(timer);
+      done();
+    });
+
+    // 绝对兜底：30s 后强制完成
+    timer = setTimeout(done, 30_000);
+    process.stdin.resume();
+  });
+}
+
 async function main(): Promise<void> {
   const empty = JSON.stringify({ continue: true });
 
-  const chunks: Buffer[] = [];
-  for await (const chunk of process.stdin) {
-    chunks.push(Buffer.from(chunk));
-  }
-  const input = Buffer.concat(chunks).toString('utf-8').trim();
+  const input = await readStdin();
 
   if (!input) { process.stdout.write(empty); return; }
 

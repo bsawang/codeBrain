@@ -1,49 +1,68 @@
 /**
  * Claude Code hook 注册/卸载。
- * 读写 ~/.claude/settings.json，以 "codebrain-" 前缀标记。
+ * 读写 ~/.claude/settings.json。
+ *
+ * Claude Code hook schema:
+ *   { hooks: { EventName: [ { matcher: string, hooks: [ { type: "command", command: "..." } ] } ] } }
  */
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
-import { join, dirname } from 'path';
+import { join } from 'path';
 import { homedir } from 'os';
 
 const CLAUDE_HOME = join(homedir(), '.claude');
 const SETTINGS_PATH = join(CLAUDE_HOME, 'settings.json');
 const HOOK_SCRIPT = join(__dirname, 'hook.js');
 
-interface ClaudeHook {
-  name: string;
-  event: string;
+interface HookEntry {
+  type: 'command';
   command: string;
-  async?: boolean;
+}
+
+interface HookGroup {
+  matcher: string;
+  hooks: HookEntry[];
 }
 
 interface ClaudeSettings {
-  hooks?: Record<string, ClaudeHook[]>;
+  hooks?: Record<string, HookGroup[]>;
+  [key: string]: unknown;
 }
 
-const CODEBRAIN_HOOKS: ClaudeHook[] = [
-  {
-    name: 'codebrain-error-collector',
-    event: 'PostToolUse',
-    command: `node "${HOOK_SCRIPT}"`,
-    async: false, // 同步执行，L0/L1 < 5ms
-  },
-];
+const CODEBRAIN_HOOK_COMMAND = `node "${HOOK_SCRIPT}"`;
+
+function isCodebrainHook(entry: HookEntry): boolean {
+  return entry.type === 'command' && entry.command.toLowerCase().includes('codebrain');
+}
+
+function hasCodebrainInGroup(group: HookGroup): boolean {
+  return group.hooks.some(isCodebrainHook);
+}
 
 export function register(): void {
   const settings = loadSettings();
   if (!settings.hooks) settings.hooks = {};
 
-  for (const hook of CODEBRAIN_HOOKS) {
-    if (!settings.hooks[hook.event]) {
-      settings.hooks[hook.event] = [];
-    }
+  const event = 'PostToolUse';
+  if (!settings.hooks[event]) {
+    settings.hooks[event] = [];
+  }
 
-    // 避免重复注册
-    const exists = settings.hooks[hook.event].some((h) => h.name === hook.name);
-    if (!exists) {
-      settings.hooks[hook.event].push(hook);
-    }
+  // 检查是否已注册
+  const alreadyRegistered = settings.hooks[event].some((g) => hasCodebrainInGroup(g));
+  if (alreadyRegistered) {
+    console.log('codebrain hook already registered.');
+    return;
+  }
+
+  // 添加到匹配所有工具的组，若已存在空 matcher 组则追加 hook
+  const catchAll = settings.hooks[event].find((g) => g.matcher === '');
+  if (catchAll) {
+    catchAll.hooks.push({ type: 'command', command: CODEBRAIN_HOOK_COMMAND });
+  } else {
+    settings.hooks[event].push({
+      matcher: '',
+      hooks: [{ type: 'command', command: CODEBRAIN_HOOK_COMMAND }],
+    });
   }
 
   saveSettings(settings);
@@ -59,16 +78,29 @@ export function unregister(): void {
 
   let removed = 0;
   for (const event of Object.keys(settings.hooks)) {
-    const before = settings.hooks[event].length;
-    settings.hooks[event] = settings.hooks[event].filter(
-      (h) => !h.name.startsWith('codebrain-'),
-    );
-    removed += before - settings.hooks[event].length;
+    const groups = settings.hooks[event];
+    const before = groups.reduce((sum, g) => sum + g.hooks.length, 0);
+
+    // 移除 codebrain hook 条目
+    for (const group of groups) {
+      group.hooks = group.hooks.filter((h) => !isCodebrainHook(h));
+    }
+
+    // 移除空组
+    settings.hooks[event] = groups.filter((g) => g.hooks.length > 0);
+
+    const after = settings.hooks[event].reduce((sum, g) => sum + g.hooks.length, 0);
+    removed += before - after;
 
     // 清理空事件组
     if (settings.hooks[event].length === 0) {
       delete settings.hooks[event];
     }
+  }
+
+  // 清理空的 hooks 对象
+  if (Object.keys(settings.hooks).length === 0) {
+    delete settings.hooks;
   }
 
   saveSettings(settings);

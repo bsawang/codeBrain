@@ -147,19 +147,30 @@ embedding:
       }
 
       const hooks = (settings.hooks || {}) as Record<string, Array<Record<string, unknown>>>;
-      const postToolUse = hooks.PostToolUse || [];
-      const hasCodebrain = postToolUse.some((h) => String(h.name || '').startsWith('codebrain'));
+      const postToolUse = (hooks.PostToolUse || []) as Array<{ matcher: string; hooks: Array<{ type: string; command: string }> }>;
+      const hookScript = join(__dirname, '..', 'adapters', 'claude-code', 'hook.js');
+      const hookCmd = `node "${hookScript}"`;
+
+      const hasCodebrain = postToolUse.some(
+        (g) => (g.hooks || []).some((h: Record<string, unknown>) => String(h.command || '').toLowerCase().includes('codebrain')),
+      );
 
       if (!hasCodebrain) {
-        const hookScript = join(__dirname, '..', 'adapters', 'claude-code', 'hook.js');
         if (!hooks.PostToolUse) hooks.PostToolUse = [];
-        hooks.PostToolUse.push({
-          name: 'codebrain-error-collector',
-          event: 'PostToolUse',
-          command: `node "${hookScript}"`,
-          async: false,
-        });
 
+        // 附加到现有空 matcher 组，或创建新组
+        const catchAll = postToolUse.find((g) => g.matcher === '');
+        if (catchAll) {
+          if (!catchAll.hooks) catchAll.hooks = [];
+          catchAll.hooks.push({ type: 'command', command: hookCmd });
+        } else {
+          postToolUse.push({
+            matcher: '',
+            hooks: [{ type: 'command', command: hookCmd }],
+          });
+        }
+
+        hooks.PostToolUse = postToolUse;
         settings.hooks = hooks;
         if (!existsSync(CLAUDE_HOME)) mkdirSync(CLAUDE_HOME, { recursive: true });
         writeFileSync(CLAUDE_SETTINGS, JSON.stringify(settings, null, 2) + '\n');
