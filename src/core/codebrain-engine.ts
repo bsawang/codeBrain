@@ -69,8 +69,20 @@ export class CodeBrainEngine {
         errorCode: event.errorCode,
         timestamp: event.timestamp,
       });
-      // 触发异步阶段1
+
+      // L2 异步匹配结果（上一轮 L0/L1 miss 后 LLM 分析的结果）
+      if (this.l2Pending) {
+        const l2 = this.l2Pending;
+        this.l2Pending = null;
+        return this.formatInjection(l2, false);
+      }
+
+      // 触发异步阶段1（AI 分组，命中则缓存 groupId 供修复时用）
       this.stage1Group(event);
+
+      // L2: LLM 语义匹配（每次 L0/L1 miss 都触发，异步）
+      this.stage2LLMMatch(event).catch(() => {});
+
       return null;
     }
 
@@ -138,6 +150,22 @@ export class CodeBrainEngine {
   // 暂存分组结果 + 进行中的 AI 分析 Promise
   private groupingCache = new Map<string, GroupingResult>();
   private groupingPromises = new Map<string, Promise<GroupingResult | null>>();
+
+  // L2 异步匹配结果（用于下一条错误时注入）
+  private l2Pending: MatchResult | null = null;
+
+  // ---- 异步 L2：LLM 语义匹配（每次 L0/L1 miss 都触发）----
+
+  private async stage2LLMMatch(event: ErrorEvent): Promise<void> {
+    try {
+      const matches = await this.matcher.matchLLM(event, this.index);
+      if (matches.length > 0) {
+        this.l2Pending = matches[0];
+      }
+    } catch {
+      // 静默失败
+    }
+  }
 
   // ---- 异步阶段1：错误分组 ----
 
