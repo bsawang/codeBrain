@@ -1,6 +1,6 @@
 {
   "name": "@bsawang/codebrain",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "系统级 AI 编码 Agent 自进化错误记忆框架",
   "keywords": [
     "ai",
