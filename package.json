@@ -1,6 +1,6 @@
 {
   "name": "@bsawang/codebrain",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "系统级 AI 编码 Agent 自进化错误记忆框架",
   "keywords": [
     "ai",
@@ -33,7 +33,7 @@
     "build": "tsc && node -e \"var f=require('fs'),p=require('path');f.mkdirSync('dist/webui',{recursive:true});f.copyFileSync('src/webui/index.html','dist/webui/index.html')\"",
     "dev": "tsc --watch",
     "start": "node dist/cli/index.js",
-    "prepublishOnly": "npm run build && node -e \"['dist/test-integration.js','dist/test-integration.js.map','dist/test-integration.d.ts'].forEach(x=>{try{require('fs').unlinkSync(x)}catch(e){}})\""
+    "prepublishOnly": "npm run build && node -e \"['dist/test-integration.js','dist/test-integration.js.map','dist/test-integration.d.ts','dist/test-live-llm.js','dist/test-live-llm.js.map','dist/test-live-llm.d.ts'].forEach(x=>{try{require('fs').unlinkSync(x)}catch(e){}})\""
   },
   "dependencies": {
     "@xenova/transformers": "^2.17.0",

@@ -5,6 +5,7 @@ import { AIAnalyzer } from './ai-analyzer';
 import { StorageEngine } from '../storage/storage-engine';
 import { EmbeddingProvider } from '../providers/embedding-provider';
 import { LLMProvider } from '../providers/llm-provider';
+import { preprocess } from './preprocessor';
 
 const ANTI_LOOP_WINDOW = 50; // 窗口内轮次
 const ANTI_LOOP_THRESHOLD = 3; // 连续命中 3 次抑制
@@ -21,7 +22,7 @@ function hashGroupId(normalized: string): string {
   for (let i = 0; i < normalized.length; i++) {
     h = ((h << 5) - h + normalized.charCodeAt(i)) | 0;
   }
-  return `grp-${Math.abs(h).toString(36)}`;
+  return `other-${Math.abs(h).toString(36)}`;
 }
 
 export class CodeBrainEngine {
@@ -70,18 +71,18 @@ export class CodeBrainEngine {
         timestamp: event.timestamp,
       });
 
-      // L2 异步匹配结果（上一轮 L0/L1 miss 后 LLM 分析的结果）
-      if (this.l2Pending) {
-        const l2 = this.l2Pending;
-        this.l2Pending = null;
-        return this.formatInjection(l2, false);
-      }
+      // [L2 跳过] L0/L1 召回率不足时取消注释启用 LLM 语义匹配兜底
+      // if (this.l2Pending) {
+      //   const l2 = this.l2Pending;
+      //   this.l2Pending = null;
+      //   return this.formatInjection(l2, false);
+      // }
 
       // 触发异步阶段1（AI 分组，命中则缓存 groupId 供修复时用）
       this.stage1Group(event);
 
-      // L2: LLM 语义匹配（每次 L0/L1 miss 都触发，异步）
-      this.stage2LLMMatch(event).catch(() => {});
+      // [L2 跳过] L0/L1 召回率不足时取消注释启用 LLM 语义匹配兜底
+      // this.stage2LLMMatch(event).catch(() => {});
 
       return null;
     }
@@ -131,7 +132,7 @@ export class CodeBrainEngine {
         this.incrementVerifiedCount(pending.groupId, command, exitCode);
       } else {
         // L0/L1 未命中过的错误 → 现在消失了意味着被修复了 → 触发阶段2 入库
-        const event = { normalized: pending.normalized, errorCode: pending.errorCode, raw: '', timestamp: pending.timestamp, command };
+        const event = { normalized: pending.normalized, errorCode: pending.errorCode, raw: '', timestamp: pending.timestamp, command, sourceFile: pending.sourceFile };
         this.stage2ExtractSolution(event, {
           error: event,
           fixTimestamp: Date.now(),
@@ -142,30 +143,36 @@ export class CodeBrainEngine {
 
   // ---- 修复检测（带 diff） ----
 
-  async onFixDetected(fix: FixInfo): Promise<void> {
-    // 触发异步阶段2
-    await this.stage2ExtractSolution(fix.error, fix);
+  onFixDetected(fix: FixInfo): void {
+    // 清理 pendingQueue 中对应条目，防止 onSuccess 重复处理
+    this.pendingQueue = this.pendingQueue.filter(
+      (p) => p.normalized !== fix.error.normalized,
+    );
+    // 异步阶段2（fire-and-forget，不阻塞热更新链路）
+    this.stage2ExtractSolution(fix.error, fix).catch(() => {});
   }
 
   // 暂存分组结果 + 进行中的 AI 分析 Promise
   private groupingCache = new Map<string, GroupingResult>();
   private groupingPromises = new Map<string, Promise<GroupingResult | null>>();
 
-  // L2 异步匹配结果（用于下一条错误时注入）
-  private l2Pending: MatchResult | null = null;
+  // 防重入：追踪进行中的 stage2ExtractSolution，避免并发重复提取
+  private extractingPromises = new Map<string, Promise<void>>();
 
-  // ---- 异步 L2：LLM 语义匹配（每次 L0/L1 miss 都触发）----
+  // [L2 跳过] L2 异步匹配结果缓存，下一条错误时注入。取消注释即可启用 L2 LLM 语义匹配
+  // private l2Pending: MatchResult | null = null;
 
-  private async stage2LLMMatch(event: ErrorEvent): Promise<void> {
-    try {
-      const matches = await this.matcher.matchLLM(event, this.index);
-      if (matches.length > 0) {
-        this.l2Pending = matches[0];
-      }
-    } catch {
-      // 静默失败
-    }
-  }
+  // [L2 跳过] 异步 L2：LLM 语义匹配（每次 L0/L1 miss 都触发）
+  // private async stage2LLMMatch(event: ErrorEvent): Promise<void> {
+  //   try {
+  //     const matches = await this.matcher.matchLLM(event, this.index);
+  //     if (matches.length > 0) {
+  //       this.l2Pending = matches[0];
+  //     }
+  //   } catch {
+  //     // 静默失败
+  //   }
+  // }
 
   // ---- 异步阶段1：错误分组 ----
 
@@ -211,8 +218,33 @@ export class CodeBrainEngine {
       try {
         const result = await promise;
         this.groupingCache.delete(key);
+        return result || null;
+      } catch { /* fall through to retry */ }
+    }
+
+    // 缓存未命中且无进行中请求 → 同步补调（兜底 stage1Group 静默失败 / 网络抖动）
+    if (!this.groupingPromises.has(key)) {
+      const retry = this.analyzer.groupError(
+        event,
+        this.index.getAll().map((k) => ({
+          groupId: k.groupId,
+          summary: k.summary,
+          errorTemplate: k.errorTemplate,
+          occurrences: k.occurrences,
+        })),
+      ).catch(() => null);
+      this.groupingPromises.set(key, retry);
+      try {
+        const result = await retry;
+        if (result) {
+          this.groupingCache.set(key, result);
+        }
+        this.groupingPromises.delete(key);
         return result;
-      } catch { return null; }
+      } catch {
+        this.groupingPromises.delete(key);
+        return null;
+      }
     }
 
     return null;
@@ -221,6 +253,20 @@ export class CodeBrainEngine {
   // ---- 异步阶段2：策略提取 + 入库 ----
 
   private async stage2ExtractSolution(event: ErrorEvent, fix: FixInfo): Promise<void> {
+    const dedupKey = event.normalized + (event.sourceFile || '');
+
+    // 防重入：同一错误已在异步提取中，跳过
+    if (this.extractingPromises.has(dedupKey)) return;
+    const task = this.#doExtractSolution(event, fix, dedupKey);
+    this.extractingPromises.set(dedupKey, task);
+    try {
+      await task;
+    } finally {
+      this.extractingPromises.delete(dedupKey);
+    }
+  }
+
+  async #doExtractSolution(event: ErrorEvent, fix: FixInfo, dedupKey: string): Promise<void> {
     try {
       const extraction = await this.analyzer.extractSolution(event, fix);
       const grouping = await this.getGrouping(event);
@@ -228,7 +274,9 @@ export class CodeBrainEngine {
       // 若无 AI 分组结果，用 normalized 哈希生成确定性临时 ID
       const groupId = grouping?.groupId || hashGroupId(event.normalized);
       const summary = grouping?.groupSummary || 'Pending classification';
-      const template = grouping?.errorTemplate || event.normalized;
+      const template = grouping?.errorTemplate
+        ? preprocess(grouping.errorTemplate)
+        : event.normalized;
 
       // 查找或创建知识条目
       let existing = this.index.get(groupId);
@@ -288,6 +336,9 @@ export class CodeBrainEngine {
       } catch { /* embedding 失败不阻塞 */ }
 
       await this.storage.upsert(existing);
+
+      // L0 精确匹配补充索引：用 event.normalized 做 key（errorTemplate 由 AI 生成可能不一致）
+      this.index.addTextKey(existing.groupId, event.normalized);
 
       // 任务③ 规则归纳：同组累计 verifiedCount ≥3 时触发
       const totalVerified = existing.solutions.reduce((sum, s) => sum + s.verifiedCount, 0);

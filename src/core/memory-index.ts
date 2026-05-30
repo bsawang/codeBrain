@@ -76,6 +76,17 @@ export class MemoryIndex {
     }
   }
 
+  /**
+   * 额外注册 L0 文本索引（用 event.normalized 做 key，弥补 errorTemplate 不匹配的问题）
+   */
+  addTextKey(groupId: string, text: string): void {
+    const existing = this.l0TextIndex.get(text) || [];
+    if (!existing.includes(groupId)) {
+      existing.push(groupId);
+    }
+    this.l0TextIndex.set(text, existing);
+  }
+
   // ---- L0 精确匹配 ----
 
   matchExactCode(errorCode: string): string[] {

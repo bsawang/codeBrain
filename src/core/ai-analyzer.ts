@@ -15,7 +15,7 @@ const GROUPING_PROMPT = `你是开发错误分析专家。
 输出 JSON（不要额外解释）:
 {
   "isNewGroup": true或false,
-  "groupId": "已有分组ID则引用，新建则生成grp-xxx",
+  "groupId": "已有分组ID则引用，新建则生成 <简短语义描述>，如 null-prop-access 或 type-mismatch。使用英文小写+连字符，不超过4段",
   "groupSummary": "这类错误的本质（一句话）",
   "errorTemplate": "剥离项目变量后的通用错误模板",
   "category": "层级路径，如 typescript/type-mismatch 或 text/trim，最多3层",

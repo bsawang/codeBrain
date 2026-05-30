@@ -50,7 +50,7 @@ async function getEngine(): Promise<CodeBrainEngine> {
       })
     : {
         async complete() {
-          return '{"isNewGroup":true,"groupId":"grp-unknown","groupSummary":"Unknown","errorTemplate":"","isProjectSpecific":false}';
+          return '{"isNewGroup":true,"groupId":"unknown","groupSummary":"Unknown","errorTemplate":"","isProjectSpecific":false}';
         },
       };
 
