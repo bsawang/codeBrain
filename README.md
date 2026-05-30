@@ -5,52 +5,27 @@
 [![npm](https://img.shields.io/npm/v/@bsawang/codebrain)](https://www.npmjs.com/package/@bsawang/codebrain)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-CodeBrain 是一个为 AI 编码 Agent（如 Claude Code）设计的**错误记忆与知识复用系统**。它拦截 Agent 的工具执行输出，自动提取、分组、归纳错误修复经验，并在同类错误再次出现时向 Agent 注入已验证的修复方案。
-
-```
-冷启动: 看到错误 → 分析 → 修复 → CodeBrain 自动提取策略
-再次遇到: 看到错误 + CodeBrain 注入历史修复方案 → 直接修复
-```
+像 `git` 一样全局安装，在任何项目目录下自动工作。从 AI Agent 会话中提取错误 → AI 分析层理解语义、归纳模式 → 沉淀为结构化知识 → 注入回 Agent 后续会话，让 AI **自主避坑、自主优化、无需用户参与**。
 
 ---
 
-## 核心能力
+## 亮点
 
-| 能力 | 说明 |
-|------|------|
-| **L0 精确匹配** | 错误文本归一化后精确查询，<1ms |
-| **L1 向量匹配** | 本地 embedding 语义相似度搜索，<5ms |
-| **策略提取** | 从错误+修复差异中自动提取 fix/rootCause/avoid |
-| **错误分组** | LLM 语义分组，不同措辞的同类错误归入同一组 |
-| **规则归纳** | 同组累积验证 ≥3 次后，自动归纳通用预防规则 |
-| **防循环** | 同组注入 ≥3 次自动抑制，第2次降级 warning |
-| **全异步** | LLM 调用均为后台执行，不阻塞 Agent 主链路 |
+### 系统级，零侵入
 
----
+全局安装，跨项目生效。所有知识存在 `~/.codebrain/knowledge.db`，不在项目下创建任何文件，不进 git。和 `git`、`node` 同级——装上就忘掉。
 
-## 架构
+### 快响应，毫秒级
 
-```
-┌─────────────┐     ┌──────────────┐     ┌─────────────┐
-│  onError()  │ ──▶ │  MatchEngine │ ──▶ │ MemoryIndex │
-│  (入口)     │     │  L0/L1 匹配  │     │  (内存索引) │
-└──────┬──────┘     └──────────────┘     └─────────────┘
-       │
-       ▼
-┌─────────────┐     ┌──────────────┐     ┌─────────────────┐
-│ AIAnalyzer  │ ◀── │CodeBrainEngine│ ──▶ │  StorageEngine  │
-│ (LLM 归纳)  │     │  (调度中心)   │     │  (SQLite 持久化)│
-└─────────────┘     └──────────────┘     └─────────────────┘
-```
+错误发生后毫秒级匹配历史知识，匹配到就立即注入修复方案，不阻塞 Agent 工作流。整个过程走本地计算、不进网络，只有全新类型的错误才会异步调用 LLM 分析。
 
-**数据流**: 错误 → Preprocessor 归一化 → L0/L1 匹配 → 命中则注入方案 / miss 则入队等待修复
+### AI 语义匹配，更准确
 
-**三层匹配**:
-- **L0**: 归一化文本精确查询 + substring 兜底
-- **L1**: Xenova/MiniLM-L6-v2 本地 embedding 余弦相似度 (384维, 阈值 0.7)
-- **L2**: LLM 语义匹配 (按需启用，当前 L0/L1 召回率已够用)
+错误分组、策略提取、规则归纳全由 LLM 驱动。关注语义而非文本——根因相同即使措辞不同（`null` vs `undefined`，`name` vs `value`），归一化后自动归入同一组。不是写死一堆正则，而是让 AI 理解错误本质。
 
-详细时序参考 [docs/core-flow-timeline.md](docs/core-flow-timeline.md)
+### 跨项目复用，自进化
+
+所有项目共享同一知识库。在项目 A 修过的错误，到项目 B 直接命中注入。修得越多，命中越快。积累的知识随使用自动增长。
 
 ---
 
@@ -64,115 +39,53 @@ npm install -g @bsawang/codebrain
 
 ### 配置
 
-创建 `~/.codebrain/config.yaml`:
-
-```yaml
-llm:
-  provider: deepseek
-  model: deepseek-chat
-  apiKey: sk-your-api-key     # DeepSeek API key
-
-embedding:
-  provider: xenova
-  model: MiniLM-L6-v2          # 本地运行，无需 API key
+```bash
+codebrain setup
 ```
 
-> 首次运行会自动下载 Xenova embedding 模型 (~80MB)，之后缓存到本地。
+交互式引导完成：LLM API key 配置、本地 embedding 模型下载（~80MB）、
+Daemon 启动 + Claude Code hook 注册。
+
+也可以手动编辑 `~/.codebrain/config.yaml` 调整参数：
+
+| 键 | 默认值 | 说明 |
+|----|--------|------|
+| `llm.provider` | `deepseek` | LLM 提供商 |
+| `llm.model` | `deepseek-chat` | 模型名 |
+| `llm.apiKey` | - | API key |
+| `llm.baseUrl` | - | 自定义 API 地址 |
+| `embedding.provider` | `xenova` | 本地 embedding |
+| `embedding.model` | `MiniLM-L6-v2` | 384维本地模型 |
 
 ### 接入 Claude Code
 
 ```bash
-# 一键安装
-codebrain setup
-
-# 或手动注册 hook
-codebrain hook register claude-code
+codebrain hook register claude-code   # 注册
+codebrain hook unregister claude-code # 卸载
 ```
 
-注册后 Claude Code 每次执行命令：
-1. stdout/stderr 自动发送到 CodeBrain daemon
-2. 命中历史错误时注入方案到 Agent 上下文
-3. 修复成功时自动提取策略入库
-
-查看状态：`codebrain stats`
+注册后 Claude Code 的工具执行输出会自动发送到 CodeBrain daemon，错误命中即注入修复方案，修复成功即提取策略入库。
 
 ### CLI 命令
 
 ```bash
-codebrain                          # 帮助信息
-codebrain setup                    # 一键安装 (配置 + daemon + hook)
-codebrain daemon <start|stop|status>  # daemon 管理
-codebrain stats                    # 知识库统计
-codebrain list                     # 列出所有分组
-codebrain tree                     # 按分类树状展示
-codebrain show <groupId>           # 查看分组详情
-codebrain search <keyword>         # 搜索知识库
-codebrain prune                    # 清理已弃用条目
-codebrain hook register claude-code  # 注册 Claude Code hook
+codebrain                 # 帮助
+codebrain setup           # 一键安装
+codebrain stats           # 知识库统计
+codebrain list            # 分组列表（按热度排序）
+codebrain tree            # 按分类树状展示
+codebrain show <groupId>  # 分组详情
+codebrain search <kw>     # 搜索
+codebrain prune           # 清理已弃用条目
 ```
 
----
+### Web UI
 
-## 编程接口
-
-```ts
-import { CodeBrainEngine, StorageEngine, XenovaEmbeddingProvider, DeepSeekProvider, createErrorEvent } from '@bsawang/codebrain';
-
-const engine = new CodeBrainEngine(
-  new XenovaEmbeddingProvider(),
-  new DeepSeekProvider({ apiKey: '...', model: 'deepseek-chat' }),
-  new StorageEngine(),
-);
-await engine.initialize();
-
-// 错误发生时
-const err = createErrorEvent('TypeError: ...', { command: 'npm test' });
-const injection = await engine.onError(err);
-// injection → null (miss) 或 "[codebrain]\nfix: ..." (命中)
-
-// 修复后
-engine.onFixDetected({ error: err, codeBefore, codeAfter, diff });
-// → 异步提取策略入库
-
-// 命令成功
-await engine.onSuccess('npm test', 0);
-// → verifiedCount++ / 触发规则归纳
+```bash
+codebrain daemon
 ```
 
-导出清单见 [src/index.ts](src/index.ts)
-
----
-
-## 配置项
-
-| 键 | 默认值 | 说明 |
-|----|--------|------|
-| `llm.provider` | `deepseek` | LLM 提供商 (deepseek/openai) |
-| `llm.model` | `deepseek-chat` | 模型名 |
-| `llm.apiKey` | - | API key (不配则用 mock) |
-| `llm.baseUrl` | - | 自定义 API 地址 |
-| `embedding.provider` | `xenova` | embedding 提供商 |
-| `embedding.model` | `MiniLM-L6-v2` | 本地模型名 |
-
----
-
-## 存储
-
-- **内存索引**: L0 文本/错误码 Map + L1 embedding 矩阵，查询 <5ms
-- **SQLite 持久化**: `~/.codebrain/knowledge.db` (sql.js WASM 实现，跨平台)
-
----
-
-## 依赖
-
-| 包 | 用途 |
-|----|------|
-| `@xenova/transformers` | 本地 embedding 模型 (MiniLM-L6-v2) |
-| `sql.js` | SQLite WASM 实现 |
-| `yaml` | 配置文件解析 |
-| `figlet` | CLI splash 页面 |
-
-**Node.js ≥ 22**
+启动后访问本地 Web 面板，可查看知识库总览、分组详情、手动编辑策略、清理弃用条目。
 
 ---
 
