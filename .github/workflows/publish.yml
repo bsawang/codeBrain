@@ -24,10 +24,12 @@ jobs:
 
       - name: Configure npm
         run: |
-          npm config set registry https://registry.npmjs.org/
-          npm config set //registry.npmjs.org/:_authToken ${{ secrets.NPM_TOKEN }}
+          cat > .npmrc << EOF
+          registry=https://registry.npmjs.org/
+          //registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}
+          EOF
 
-      - name: Verify auth
+      - name: Debug auth
         run: npm whoami
 
       - name: Install dependencies
