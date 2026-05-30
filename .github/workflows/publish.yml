@@ -23,11 +23,12 @@ jobs:
           node-version: '22'
 
       - name: Configure npm
-        run: |
-          cat > .npmrc << EOF
-          registry=https://registry.npmjs.org/
-          //registry.npmjs.org/:_authToken=${{ secrets.publish_token }}
-          EOF
+        run: node -e "require('fs').writeFileSync('.npmrc','registry=https://registry.npmjs.org/\n//registry.npmjs.org/:_authToken='+process.env.NPM_TOKEN)"
+        env:
+          NPM_TOKEN: ${{ secrets.publish_token }}
+
+      - name: Debug config
+        run: npm config list
 
       - name: Debug auth
         run: npm whoami
