@@ -70,7 +70,7 @@ export class CodeBrainEngine {
         timestamp: event.timestamp,
       });
       // 触发异步阶段1
-      this.stage1Group(event).catch(() => {});
+      this.stage1Group(event);
       return null;
     }
 
@@ -135,26 +135,59 @@ export class CodeBrainEngine {
     await this.stage2ExtractSolution(fix.error, fix);
   }
 
-  // 暂存分组结果（单个会话内）
+  // 暂存分组结果 + 进行中的 AI 分析 Promise
   private groupingCache = new Map<string, GroupingResult>();
+  private groupingPromises = new Map<string, Promise<GroupingResult | null>>();
 
   // ---- 异步阶段1：错误分组 ----
 
-  private async stage1Group(event: ErrorEvent): Promise<void> {
-    try {
-      const groups = this.index.getAll().map((k) => ({
+  private stage1Group(event: ErrorEvent): void {
+    const key = event.normalized + (event.sourceFile || '');
+
+    // 避免对同一错误发起重复 AI 调用
+    if (this.groupingPromises.has(key) || this.groupingCache.has(key)) return;
+
+    const promise = this.analyzer.groupError(
+      event,
+      this.index.getAll().map((k) => ({
         groupId: k.groupId,
         summary: k.summary,
         errorTemplate: k.errorTemplate,
         occurrences: k.occurrences,
-      }));
-
-      const result = await this.analyzer.groupError(event, groups);
-      const key = event.normalized + (event.sourceFile || '');
+      })),
+    ).then((result) => {
       this.groupingCache.set(key, result);
-    } catch {
-      // 静默失败，不影响主流程
+      this.groupingPromises.delete(key);
+      return result;
+    }).catch(() => {
+      this.groupingPromises.delete(key);
+      return null;
+    });
+
+    this.groupingPromises.set(key, promise);
+  }
+
+  private async getGrouping(event: ErrorEvent): Promise<GroupingResult | null> {
+    const key = event.normalized + (event.sourceFile || '');
+
+    // 已有结果直接返回
+    const cached = this.groupingCache.get(key);
+    if (cached) {
+      this.groupingCache.delete(key);
+      return cached;
     }
+
+    // 等待进行中的分析
+    const promise = this.groupingPromises.get(key);
+    if (promise) {
+      try {
+        const result = await promise;
+        this.groupingCache.delete(key);
+        return result;
+      } catch { return null; }
+    }
+
+    return null;
   }
 
   // ---- 异步阶段2：策略提取 + 入库 ----
@@ -162,9 +195,7 @@ export class CodeBrainEngine {
   private async stage2ExtractSolution(event: ErrorEvent, fix: FixInfo): Promise<void> {
     try {
       const extraction = await this.analyzer.extractSolution(event, fix);
-      const key = event.normalized + (event.sourceFile || '');
-      const grouping = this.groupingCache.get(key);
-      this.groupingCache.delete(key);
+      const grouping = await this.getGrouping(event);
 
       // 若无 AI 分组结果，用 normalized 哈希生成确定性临时 ID
       const groupId = grouping?.groupId || hashGroupId(event.normalized);
@@ -229,6 +260,54 @@ export class CodeBrainEngine {
       } catch { /* embedding 失败不阻塞 */ }
 
       await this.storage.upsert(existing);
+
+      // 任务③ 规则归纳：同组累计 verifiedCount ≥3 时触发
+      const totalVerified = existing.solutions.reduce((sum, s) => sum + s.verifiedCount, 0);
+      if (totalVerified >= 3 && !existing.abstractRule) {
+        this.stage3InduceRule(existing.groupId).catch(() => {});
+      }
+    } catch {
+      // 静默失败
+    }
+  }
+
+  // ---- 异步阶段3：规则归纳 ----
+
+  private async stage3InduceRule(groupId: string): Promise<void> {
+    try {
+      const knowledge = this.index.get(groupId);
+      if (!knowledge || knowledge.abstractRule) return;
+
+      const solutions = knowledge.solutions
+        .filter((s) => s.strategy && s.rootCause);
+
+      if (solutions.length === 0) return;
+
+      // 用 verifiedCount 作为事件的重复次数
+      const eventsWithSolutions = solutions.map((s) => ({
+        error: {
+          normalized: knowledge.errorTemplate,
+          raw: '',
+          timestamp: knowledge.firstSeen,
+          errorCode: undefined,
+        } as ErrorEvent,
+        solution: {
+          strategy: s.strategy,
+          rootCause: s.rootCause,
+          avoidanceHint: s.avoidanceHint,
+        },
+      }));
+
+      const totalVerified = solutions.reduce((sum, s) => sum + s.verifiedCount, 0);
+      if (totalVerified < 3) return;
+
+      const rule = await this.analyzer.induceRule(knowledge.summary, eventsWithSolutions);
+
+      knowledge.abstractRule = rule.abstractRule;
+      knowledge.triggerDescription = rule.triggerDescription;
+      knowledge.preventionAdvice = rule.preventionAdvice;
+
+      await this.storage.upsert(knowledge);
     } catch {
       // 静默失败
     }
@@ -263,6 +342,12 @@ export class CodeBrainEngine {
     knowledge.occurrences++;
     knowledge.lastSeen = Date.now();
     this.storage.upsert(knowledge).catch(() => {});
+
+    // 任务③ 规则归纳：累计 verifiedCount ≥3 时触发
+    const totalVerified = knowledge.solutions.reduce((sum, s) => sum + s.verifiedCount, 0);
+    if (totalVerified >= 3 && !knowledge.abstractRule) {
+      this.stage3InduceRule(knowledge.groupId).catch(() => {});
+    }
   }
 
   // ---- 注入格式化 ----
@@ -284,8 +369,18 @@ export class CodeBrainEngine {
       lines.push('⚠ 此方案上次未解决该问题');
     }
 
+    // 规则归纳结果
+    if (k.abstractRule) {
+      lines.push(`rule: ${k.abstractRule}`);
+    }
+
     // 版本差异提醒
-    // TODO: 从当前上下文获取依赖版本做对比
+    if (k.dependencyVersions) {
+      const deps = Object.entries(k.dependencyVersions)
+        .map(([n, v]) => `${n}@${v}`)
+        .join(', ');
+      lines.push(`ver: 验证于 ${deps}`);
+    }
 
     return lines.join('\n');
   }

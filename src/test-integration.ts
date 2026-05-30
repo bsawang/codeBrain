@@ -1,5 +1,5 @@
 /**
- * 模拟全链路测试：用 mock LLM 走通完整流程。
+ * 模拟全链路测试：用 mock LLM 走通完整流程（含规则归纳）。
  * 编译后: node dist/test-integration.js
  */
 import { CodeBrainEngine } from './core/codebrain-engine';
@@ -12,29 +12,31 @@ import { tmpdir } from 'os';
 const TEST_DB = join(tmpdir(), 'codebrain-test.db');
 
 async function main() {
-  console.log('=== codebrain 全链路测试 ===\n');
+  console.log('=== codebrain 全链路测试 (含规则归纳) ===\n');
 
-  // Mock LLM: 返回合理的 JSON 但不调真实 API
-  let groupCounter = 0;
   const mockLLM = {
     async complete(prompt: string): Promise<string> {
-      if (prompt.includes('isNewGroup')) {
-        // 任务①: 错误分组
-        groupCounter++;
-        const id = `grp-store-null-${groupCounter}`;
+      if (prompt.includes('抽象规则') || prompt.includes('abstractRule')) {
         return JSON.stringify({
-          isNewGroup: true,
-          groupId: id,
-          groupSummary: 'Zustand store 空值访问',
-          errorTemplate: "TypeError: accessing property on null/undefined from store selector",
+          abstractRule: 'store 返回值必须先做空值检查再访问属性',
+          triggerDescription: '当 store selector 返回可能为 null/undefined 时触发',
+          preventionAdvice: '使用可选链 (?.) 或提前 return null guard',
+        });
+      }
+      if (prompt.includes('isNewGroup')) {
+        return JSON.stringify({
+          isNewGroup: false,
+          groupId: 'grp-store-null',
+          groupSummary: '空值访问错误',
+          errorTemplate: "TypeError: accessing property on null/undefined",
+          category: 'javascript/type-error',
           isProjectSpecific: false,
         });
       }
-      if (prompt.includes('代码')) {
-        // 任务②: 策略提取
+      if (prompt.includes('代码') || prompt.includes('Diff') || prompt.includes('修复前')) {
         return JSON.stringify({
           strategy: '使用可选链 ?. 做安全访问',
-          rootCause: 'store 初始状态为 null，直接属性访问导致空指针',
+          rootCause: 'store 初始状态为 null，直接访问属性导致空指针',
           avoidanceHint: '不对 store 返回值做判空就访问属性',
         });
       }
@@ -47,85 +49,81 @@ async function main() {
   const engine = new CodeBrainEngine(embedding, mockLLM, storage);
   await engine.initialize();
 
-  // ---- 场景 1: 第一次错误（冷启动） ----
-  console.log('1. 第一次错误: 冷启动，无历史知识');
+  // ==== 错误 1: 冷启动 → L0/L1 miss → onFixDetected → solution #1 (v=1) ====
+  console.log('1. 错误 1: 冷启动 miss → AI 分组 → 入库 solution #1');
   const err1 = createErrorEvent(
     "TypeError: Cannot read properties of null (reading 'name')\n    at Home (src/pages/Home.tsx:12:17)",
     { command: 'npm run dev', sourceFile: 'src/pages/Home.tsx' },
   );
   const r1 = await engine.onError(err1);
-  console.log(`   注入: ${r1 || '(无 — L0/L1 未命中，知识库空)'}`);
+  console.log(`   注入: ${r1 || '(无 — 知识库空)'}`);
 
-  // 模拟 Agent 修复
-  console.log('\n2. Agent 修复: 加可选链 user?.name');
-  const fix1 = {
+  // onFixDetected: 有 diff 的修复 → stage2ExtractSolution
+  await engine.onFixDetected({
     error: err1,
     codeBefore: 'console.log(user.name)',
     codeAfter: 'console.log(user?.name)',
-    diff: '- console.log(user.name)\n+ console.log(user?.name)',
+    diff: '+ user?.name',
     fixTimestamp: Date.now(),
-  };
+  });
+  console.log('   onFixDetected → solution #1, verifiedCount=1\n');
 
-  // 模拟修复检测
-  await engine.onSuccess('npm run dev', 0);
-  await engine.onFixDetected(fix1);
-  console.log('   知识已入库（内存+SQLite）');
-
-  // ---- 场景 2: 同类错误再次出现（L1 命中） ----
-  console.log('\n3. 同类错误再次出现（同一会话）');
+  // ==== 错误 2: 同类错误 → L1 命中 → onSuccess → v=2 ====
+  console.log('2. 错误 2: L1 命中 → onSuccess → verifiedCount=2');
   const err2 = createErrorEvent(
     "TypeError: Cannot read properties of undefined (reading 'value')\n    at App (src/App.tsx:42:5)",
     { command: 'npm run dev', sourceFile: 'src/App.tsx' },
   );
   const r2 = await engine.onError(err2);
-  console.log(`   注入: ${r2 ? '✅\n' + r2 : '❌ 未命中'}`);
+  console.log(`   注入: ${r2 ? '✅' : '❌ miss'}`);
 
-  // 第二次修复
+  // 命中路径: 只需 onSuccess 即可 increment verifiedCount
   await engine.onSuccess('npm run dev', 0);
-  const fix2 = {
-    error: err2,
-    diff: '- document.body.className = settings.value\n+ document.body.className = settings?.value',
-    fixTimestamp: Date.now(),
-  };
-  await engine.onFixDetected(fix2);
+  console.log('   onSuccess → verifiedCount=2\n');
 
-  // ---- 场景 3: 第三次同类错误（L0 errorCode 命中） ----
-  console.log('\n4. 第三次同类错误（verifiedCount 已累积）');
+  // ==== 错误 3: L0 命中 → onSuccess → v=3 → 🔧 规则归纳 ====
+  console.log('3. 错误 3: L0 命中 → onSuccess → verifiedCount=3 → 规则归纳');
   const err3 = createErrorEvent(
     "TypeError: Cannot read properties of null (reading 'title')",
     { command: 'npm run dev' },
   );
   const r3 = await engine.onError(err3);
-  console.log(`   注入: ${r3 ? '✅\n' + r3 : '❌ 未命中'}`);
+  const lines3 = r3?.split('\n') || [];
+  console.log(`   注入: ${r3 ? '✅' : '❌'}`);
+  const ruleLine = lines3.find(l => l.startsWith('rule:'));
+  if (ruleLine) console.log(`   🔧 ${ruleLine}`);
 
-  // 第三次修复
   await engine.onSuccess('npm run dev', 0);
-  const fix3 = { error: err3, diff: '+?.', fixTimestamp: Date.now() };
-  await engine.onFixDetected(fix3);
+  console.log('   onSuccess → verifiedCount=3\n');
 
-  // ---- 场景 4: 不同类错误（不命中） ----
-  console.log('\n5. 不同类错误（应不命中）');
+  // ==== 错误 4: 不同类型（不命中） ====
+  console.log('4. 不同类错误: Module not found（应不命中）');
   const err4 = createErrorEvent(
     "Error: Module not found: Can't resolve 'lodash'",
     { command: 'npm run dev' },
   );
   const r4 = await engine.onError(err4);
-  console.log(`   注入: ${r4 || '(无 — 语义不匹配，正确)'}`);
+  console.log(`   注入: ${r4 || '(无, 正确)'}\n`);
 
-  // ---- 查看知识库 ----
-  console.log('\n=== 知识库状态 ===');
+  // ==== 知识库 ====
+  console.log('=== 知识库状态 ===');
   const s = await engine.stats;
   console.log(`分组: ${s.totalGroups} | 事件: ${s.totalEvents}`);
+  let passed = false;
   for (const k of engine.knowledge.getAll()) {
+    const tv = k.solutions.reduce((sum, s) => sum + s.verifiedCount, 0);
     console.log(`\n[${k.groupId}] ${k.summary}`);
-    console.log(`  出现: ${k.occurrences} | 状态: ${k.status}`);
-    for (const sol of k.solutions) {
-      console.log(`  - v=${sol.verifiedCount} | fix: ${sol.strategy} | root: ${sol.rootCause}`);
+    console.log(`  出现: ${k.occurrences} | 方案: ${k.solutions.length} | 总验证: ${tv}`);
+    if (k.abstractRule) {
+      console.log(`  🔧 规则: ${k.abstractRule}`);
+      console.log(`     触发: ${k.triggerDescription}`);
+      console.log(`     预防: ${k.preventionAdvice}`);
+      passed = true;
     }
   }
 
   storage.close();
-  console.log('\n=== 全链路测试通过 ===');
+  console.log(`\n${passed ? '✅ 规则归纳已触发 — 测试通过' : '⚠️ 规则归纳未触发'}`);
 }
 
 main().catch(console.error);
