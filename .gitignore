@@ -29,3 +29,9 @@ dist/
 # OS
 Thumbs.db
 .DS_Store
+
+# Test artifacts (generated from test runs)
+test-errors*.json
+test-results*.json
+gen-100-tests.js
+test-run-*.js

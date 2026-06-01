@@ -1,5 +1,23 @@
 import { ErrorKnowledge } from './types';
 
+/** 从模板中提取错误码（Node.js / TS / ESLint 等） */
+function extractCode(template: string): string | undefined {
+  const m = template.match(/\b(ENOENT|EACCES|ECONNREFUSED|EADDRINUSE|EPERM|EISDIR|ENOTDIR|ENOTEMPTY|EEXIST|EINVAL|EMFILE|ENOSPC|TS\d{4}|ERR_[A-Z_]+|[A-Z]+-\d+|P\d{4})\b/);
+  return m?.[0];
+}
+
+/** 提取错误签名——去掉具体堆栈帧，保留错误类型+核心消息 */
+function errorSignature(normalized: string): string {
+  // 截断到第一个堆栈指示符（Require stack / Traceback / at <FUNC> / 行号指示符）
+  // 不要求 at <FUNC> 在行首（SyntaxError 类型可能在同行有 at <FUNC> 位置信息）
+  const cutoff = /(?:Require stack:|Traceback \(most recent call last\):|at <FUNC>|^\s+\d+ \|)/m;
+  const match = normalized.match(cutoff);
+  if (match && match.index !== undefined && match.index > 10) {
+    return normalized.slice(0, match.index).trim();
+  }
+  return normalized;
+}
+
 /**
  * 内存索引：L0 精确匹配 + L1 向量搜索。
  * 所有知识入库时同步更新索引，查询纯内存，< 5ms。
@@ -26,10 +44,14 @@ export class MemoryIndex {
   add(knowledge: ErrorKnowledge): void {
     this.knowledgeMap.set(knowledge.groupId, knowledge);
 
-    // L0 错误码索引
-    if (!this.l0Index.has('')) {
-      // 从 errorTemplate 中提取错误码来建索引（如果有 TS2322 之类）
-      // 实际由 AI 分析层在分组时确定
+    // L0 错误码索引：从 errorTemplate 中提取已知错误码
+    const code = extractCode(knowledge.errorTemplate);
+    if (code) {
+      const groups = this.l0Index.get(code) || [];
+      if (!groups.includes(knowledge.groupId)) {
+        groups.push(knowledge.groupId);
+      }
+      this.l0Index.set(code, groups);
     }
 
     // L0 文本索引（基于 errorTemplate）
@@ -94,16 +116,17 @@ export class MemoryIndex {
   }
 
   matchExactText(normalized: string): string[] {
-    // 尝试精确匹配
+    // 1. 精确匹配
     const direct = this.l0TextIndex.get(normalized);
     if (direct && direct.length > 0) return direct;
 
-    // 如果 normalized 文本没有精确命中，尝试包含匹配
+    // 2. 签名匹配：忽略堆栈差异，只比对错误类型+消息（原 includes 逻辑已移除，
+    //    includes 会跨匹配不同根因的错误，如 ESLint parser error 包含 "Cannot find module" 文本）
+    const sig = errorSignature(normalized);
     for (const [template, groups] of this.l0TextIndex) {
-      if (normalized.includes(template) || template.includes(normalized)) {
-        return groups;
-      }
+      if (sig === errorSignature(template)) return groups;
     }
+
     return [];
   }
 

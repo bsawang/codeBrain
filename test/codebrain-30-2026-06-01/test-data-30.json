@@ -1,0 +1,286 @@
+{
+  "meta": {
+    "name": "codebrain-test-data",
+    "version": "1.1",
+    "description": "34 条标准测试输入",
+    "generated": "2026-05-31T23:43:01.384Z",
+    "total": 34,
+    "seeds": 20,
+    "verifies": 10,
+    "successes": 4
+  },
+  "cases": [
+    {
+      "id": 1,
+      "name": "ESLint 缺模块 (npx)",
+      "command": "npx eslint src/",
+      "errorCode": null,
+      "output": "Error: Cannot find module 'eslint-plugin-react'\nRequire stack:\n- /app/node_modules/.bin/eslint.js:1:1",
+      "normalized": "Error: Cannot find module <STR> Require stack: - <FILE>:<LINE>"
+    },
+    {
+      "id": 2,
+      "name": "npm 缺模块 (ERR 码)",
+      "command": "npm install",
+      "errorCode": null,
+      "output": "npm ERR! code MODULE_NOT_FOUND\nnpm ERR! Cannot find module 'lodash'",
+      "normalized": "npm ERR! code MODULE_NOT_FOUND npm ERR! Cannot find module <STR>"
+    },
+    {
+      "id": 3,
+      "name": "Node 重复发 HTTP 头 (ERR_HTTP_HEADERS_SENT)",
+      "command": "node server.js",
+      "errorCode": "ERR_HTTP_HEADERS_SENT",
+      "output": "Error [ERR_HTTP_HEADERS_SENT]: Cannot set headers after they are sent to the client\n    at ServerResponse.setHeader (_http_outgoing.js:518:11)",
+      "normalized": "Error [ERR_HTTP_HEADERS_SENT]: Cannot set headers after they are sent to the client at <FUNC> (_http_outgoing.js:<LINE>)"
+    },
+    {
+      "id": 4,
+      "name": "Null 属性访问 (name)",
+      "command": "npm run dev",
+      "errorCode": null,
+      "output": "TypeError: Cannot read properties of null (reading 'name')\n    at Home (src/pages/Home.tsx:12:17)",
+      "normalized": "TypeError: Cannot read properties of <NIL> (reading <STR>) at <FUNC> (src<FILE>:<LINE>)"
+    },
+    {
+      "id": 5,
+      "name": "TS2322 缺属性类型",
+      "command": "npx tsc --noEmit",
+      "errorCode": "TS2322",
+      "output": "src/Modal.tsx:45:7 - error TS2322: Type '{ children: string; }' is not assignable to type 'IntrinsicAttributes & ModalProps'.\n  Property 'isOpen' is missing in type 'ModalProps'.",
+      "normalized": "src<FILE>:<LINE> - error TS2322: Type <STR> is not assignable to type <STR>. Property <STR> is missing in type <STR>."
+    },
+    {
+      "id": 6,
+      "name": "TS2304 cannot find name",
+      "command": "npx tsc --noEmit",
+      "errorCode": "TS2304",
+      "output": "src/app.tsx:10:5 - error TS2304: Cannot find name 'something'.",
+      "normalized": "src<FILE>:<LINE> - error TS2304: Cannot find name <STR>."
+    },
+    {
+      "id": 7,
+      "name": "TS2554 参数数量错误",
+      "command": "npx tsc --noEmit",
+      "errorCode": "TS2554",
+      "output": "src/utils.ts:3:18 - error TS2554: Expected 2 arguments, but got 1.",
+      "normalized": "src<FILE>:<LINE> - error TS2554: Expected <NUM> arguments, but got <NUM>."
+    },
+    {
+      "id": 8,
+      "name": "JSON 语法错误",
+      "command": "npm run dev",
+      "errorCode": null,
+      "output": "SyntaxError: Unexpected token '<' in JSON at position 42",
+      "normalized": "SyntaxError: Unexpected <SYNTAX> <STR> in JSON at position <NUM>"
+    },
+    {
+      "id": 9,
+      "name": "Git push 被拒 (main)",
+      "command": "git push origin main",
+      "errorCode": null,
+      "output": "! [rejected]        main -> main (non-fast-forward)\nerror: failed to push some refs to 'https://github.com/user/repo.git'",
+      "normalized": "! [rejected] <BRANCH> -> <BRANCH> (non-fast-forward) error: failed to push some refs to '<URL>"
+    },
+    {
+      "id": 10,
+      "name": "Git merge 冲突",
+      "command": "git merge feature/login",
+      "errorCode": null,
+      "output": "CONFLICT (content): Merge conflict in src/index.ts\nAutomatic merge failed; fix conflicts and then commit.",
+      "normalized": "CONFLICT (content): Merge conflict in src<FILE> Automatic merge failed; fix conflicts and then commit."
+    },
+    {
+      "id": 11,
+      "name": "Docker 端口占用 (3000)",
+      "command": "docker run -p 3000:3000 app",
+      "errorCode": null,
+      "output": "docker: Error response from daemon: driver failed programming external connectivity on endpoint app: Error starting userland proxy: listen tcp 0.0.0.0:3000: bind: address already in use.",
+      "normalized": "docker: Error response from daemon: driver failed programming external connectivity on endpoint app: Error starting userland proxy: listen tcp <NUM>.<NUM>.<NUM>.<NUM>:<LINE>: bind: address already in use."
+    },
+    {
+      "id": 12,
+      "name": "EADDRINUSE 端口 3000",
+      "command": "node server.js",
+      "errorCode": "EADDRINUSE",
+      "output": "Error: listen EADDRINUSE: address already in use :::3000",
+      "normalized": "Error: listen EADDRINUSE: address already in use :::<LINE>"
+    },
+    {
+      "id": 13,
+      "name": "ENOENT config.json",
+      "command": "node script.js",
+      "errorCode": "ENOENT",
+      "output": "Error: ENOENT: no such file or directory, open '/app/config/config.json'",
+      "normalized": "Error: ENOENT: no such file or directory, open <STR>"
+    },
+    {
+      "id": 14,
+      "name": "EACCES app.log",
+      "command": "node app.js",
+      "errorCode": "EACCES",
+      "output": "Error: EACCES: permission denied, access '/var/log/app.log'",
+      "normalized": "Error: EACCES: permission denied, access <STR>"
+    },
+    {
+      "id": 15,
+      "name": "ESLint 引号规则",
+      "command": "npx eslint src/",
+      "errorCode": null,
+      "output": "/app/src/App.tsx:5:3 - Strings must use doublequote. (quotes)",
+      "normalized": "<FILE>:<LINE> - Strings must use doublequote. (quotes)"
+    },
+    {
+      "id": 16,
+      "name": "npm ELIFECYCLE",
+      "command": "npm run start",
+      "errorCode": null,
+      "output": "npm ERR! code ELIFECYCLE\nnpm ERR! errno 1\nnpm ERR! app@1.0.0 start: `node index.js`\nnpm ERR! Exit status 1",
+      "normalized": "npm ERR! code ELIFECYCLE npm ERR! errno <NUM> npm ERR! app@<NUM>.<NUM>.<NUM> start: `node index.js` npm ERR! Exit status <NUM>"
+    },
+    {
+      "id": 17,
+      "name": "Python import 缺模块",
+      "command": "python app.py",
+      "errorCode": null,
+      "output": "Traceback (most recent call last):\n  File \"/app/app.py\", line 1, in <module>\n    import requests\nModuleNotFoundError: No module named 'requests'",
+      "normalized": "Traceback (most recent call last): File <STR>, line <NUM>, in <module> import requests ModuleNotFoundError: No module named <STR>"
+    },
+    {
+      "id": 18,
+      "name": "pip 找不到版本",
+      "command": "pip install requests",
+      "errorCode": null,
+      "output": "ERROR: Could not find a version that satisfies the requirement requests===2.25.0\nERROR: No matching distribution found for requests===2.25.0",
+      "normalized": "ERROR: Could not find a version that satisfies the requirement requests===<NUM>.<NUM>.<NUM> ERROR: No matching distribution found for requests===<NUM>.<NUM>.<NUM>"
+    },
+    {
+      "id": 19,
+      "name": "Docker 容器不存在",
+      "command": "docker exec -it myapp bash",
+      "errorCode": null,
+      "output": "Error: No such container: myapp",
+      "normalized": "Error: No such container: myapp"
+    },
+    {
+      "id": 20,
+      "name": "Jest 断言失败",
+      "command": "npx jest",
+      "errorCode": null,
+      "output": " FAIL  src/__tests__/App.test.tsx\n  ● App tests › renders\n\n    expect(received).toBe(expected) // Object.is equality\n\n    Expected: 5\n    Received: 3",
+      "normalized": "FAIL src<FILE> ● App tests › renders expect(received).toBe(expected) <FILE> Object.is equality Expected: <NUM> Received: <NUM>"
+    },
+    {
+      "id": 21,
+      "name": "ESLint 缺别的插件",
+      "command": "npx eslint src/",
+      "errorCode": null,
+      "output": "Error: Cannot find module 'eslint-plugin-prettier'\nRequire stack:\n- /app/node_modules/.bin/eslint.js:1:1",
+      "normalized": "Error: Cannot find module <STR> Require stack: - <FILE>:<LINE>"
+    },
+    {
+      "id": 22,
+      "name": "Null 访问 title (同#4)",
+      "command": "npm run dev",
+      "errorCode": null,
+      "output": "TypeError: Cannot read properties of null (reading 'title')\n    at Header (src/components/Header.tsx:8:22)",
+      "normalized": "TypeError: Cannot read properties of <NIL> (reading <STR>) at <FUNC> (src<FILE>:<LINE>)"
+    },
+    {
+      "id": 23,
+      "name": "TS2322 类型不符 (同#5)",
+      "command": "npx tsc --noEmit",
+      "errorCode": "TS2322",
+      "output": "src/utils.ts:10:7 - error TS2322: Type 'boolean' is not assignable to type 'string'.",
+      "normalized": "src<FILE>:<LINE> - error TS2322: Type <STR> is not assignable to type <STR>."
+    },
+    {
+      "id": 24,
+      "name": "Git push 另一分支 (同#9)",
+      "command": "git push origin feature/login",
+      "errorCode": null,
+      "output": "! [rejected]        feature/login -> feature/login (non-fast-forward)\nerror: failed to push some refs to 'https://github.com/user/repo.git'",
+      "normalized": "! [rejected] <BRANCH> -> <BRANCH> (non-fast-forward) error: failed to push some refs to '<URL>"
+    },
+    {
+      "id": 25,
+      "name": "Docker 端口 8080 (同#11)",
+      "command": "docker run -p 8080:80 nginx",
+      "errorCode": null,
+      "output": "docker: Error response from daemon: driver failed programming external connectivity on endpoint nginx: Error starting userland proxy: listen tcp 0.0.0.0:8080: bind: address already in use.",
+      "normalized": "docker: Error response from daemon: driver failed programming external connectivity on endpoint nginx: Error starting userland proxy: listen tcp <NUM>.<NUM>.<NUM>.<NUM>:<LINE>: bind: address already in use."
+    },
+    {
+      "id": 26,
+      "name": "EADDRINUSE 4000 (同#12)",
+      "command": "node server.js",
+      "errorCode": "EADDRINUSE",
+      "output": "Error: listen EADDRINUSE: address already in use :::4000",
+      "normalized": "Error: listen EADDRINUSE: address already in use :::<LINE>"
+    },
+    {
+      "id": 27,
+      "name": "ENOENT data.json (同#13)",
+      "command": "node script.js",
+      "errorCode": "ENOENT",
+      "output": "Error: ENOENT: no such file or directory, open '/app/data/data.json'",
+      "normalized": "Error: ENOENT: no such file or directory, open <STR>"
+    },
+    {
+      "id": 28,
+      "name": "EACCES error.log (同#14)",
+      "command": "node app.js",
+      "errorCode": "EACCES",
+      "output": "Error: EACCES: permission denied, access '/var/log/nginx/error.log'",
+      "normalized": "Error: EACCES: permission denied, access <STR>"
+    },
+    {
+      "id": 29,
+      "name": "Node require 缺 express (同#1)",
+      "command": "node index.js",
+      "errorCode": null,
+      "output": "internal/modules/cjs/loader.js:905\n  throw err;\nError: Cannot find module 'express'\nRequire stack:\n- /app/index.js",
+      "normalized": "internal<FILE>:<LINE> throw err; Error: Cannot find module <STR> Require stack: - <FILE>"
+    },
+    {
+      "id": 30,
+      "name": "npm 缺 react (同#2)",
+      "command": "npm install",
+      "errorCode": null,
+      "output": "npm ERR! code MODULE_NOT_FOUND\nnpm ERR! Cannot find module 'react'",
+      "normalized": "npm ERR! code MODULE_NOT_FOUND npm ERR! Cannot find module <STR>"
+    },
+    {
+      "id": 31,
+      "name": "miss→onSuccess 入库 (Rust 类型错)",
+      "command": "cargo build",
+      "errorCode": "E0308",
+      "output": "error[E0308]: mismatched types\n --> src/main.rs:25:5\n  |\n25 |     let x: i32 = \"hello\";\n  |     ^^^^^^^^^^ expected `i32`, found `&str`",
+      "normalized": "error[E0308]: mismatched types --> src<FILE>:<LINE> | <NUM> | let x: i32 = <STR>; | ^^^^^^^^^^ expected `i32`, found `&str`"
+    },
+    {
+      "id": 32,
+      "name": "hit→onSuccess verifiedCount+1 (同#1#21)",
+      "command": "npx eslint src/",
+      "errorCode": null,
+      "output": "Error: Cannot find module 'eslint-plugin-prettier'\nRequire stack:\n- /app/node_modules/.bin/eslint.js:1:1",
+      "normalized": "Error: Cannot find module <STR> Require stack: - <FILE>:<LINE>"
+    },
+    {
+      "id": 33,
+      "name": "miss→onSuccess 入库 (ENOTFOUND)",
+      "command": "node server.js",
+      "errorCode": null,
+      "output": "Error: getaddrinfo ENOTFOUND api.example.com\n    at GetAddrInfoReqWrap.onlookup [as oncomplete] (dns.js:71:26)",
+      "normalized": "Error: getaddrinfo ENOTFOUND api.example.com at GetAddrInfoReqWrap.onlookup [as oncomplete] (dns.js:<LINE>)"
+    },
+    {
+      "id": 34,
+      "name": "hit→onSuccess 批量处理 (同#14)",
+      "command": "node app.js",
+      "errorCode": "EACCES",
+      "output": "Error: EACCES: permission denied, access '/var/log/app.log'",
+      "normalized": "Error: EACCES: permission denied, access <STR>"
+    }
+  ]
+}

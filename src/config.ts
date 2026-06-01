@@ -1,9 +1,6 @@
 import { readFileSync } from 'fs';
-import { join } from 'path';
-import { homedir } from 'os';
 import { parse as parseYaml } from 'yaml';
-
-const CODEBRAIN_HOME = join(homedir(), '.codebrain');
+import { getConfigPath } from './paths.js';
 
 export interface CodeBrainConfig {
   llm: {
@@ -21,7 +18,7 @@ export interface CodeBrainConfig {
 const DEFAULT_CONFIG: CodeBrainConfig = {
   llm: {
     provider: 'deepseek',
-    model: 'deepseek-chat',
+    model: 'deepseek-v4-flash',
   },
   embedding: {
     provider: 'xenova',
@@ -30,7 +27,7 @@ const DEFAULT_CONFIG: CodeBrainConfig = {
 };
 
 export function loadConfig(configPath?: string): CodeBrainConfig {
-  const path = configPath || join(CODEBRAIN_HOME, 'config.yaml');
+  const path = configPath || getConfigPath();
 
   try {
     const raw = readFileSync(path, 'utf-8');

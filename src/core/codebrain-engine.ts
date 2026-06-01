@@ -1,4 +1,4 @@
-import { ErrorEvent, ErrorKnowledge, MatchResult, FixInfo, PendingError, GroupingResult } from './types';
+import { ErrorEvent, ErrorKnowledge, MatchResult, FixInfo, PendingError } from './types';
 import { MemoryIndex } from './memory-index';
 import { MatchEngine } from './match-engine';
 import { AIAnalyzer } from './ai-analyzer';
@@ -6,22 +6,37 @@ import { StorageEngine } from '../storage/storage-engine';
 import { EmbeddingProvider } from '../providers/embedding-provider';
 import { LLMProvider } from '../providers/llm-provider';
 import { preprocess } from './preprocessor';
+import { logger } from '../logger.js';
 
-const ANTI_LOOP_WINDOW = 50; // 窗口内轮次
-const ANTI_LOOP_THRESHOLD = 3; // 连续命中 3 次抑制
+const ANTI_LOOP_WINDOW = 50;
+const ANTI_LOOP_THRESHOLD = 5;
 
-interface InjectionRecord {
-  groupId: string;
-  turnIndex: number;
-  suppressed: boolean;
+async function withRetry<T>(label: string, fn: () => Promise<T>, retries = 2): Promise<T> {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try { return await fn(); }
+    catch (e) {
+      if (attempt < retries) await new Promise((r) => setTimeout(r, 500 * Math.pow(2, attempt)));
+      else throw e;
+    }
+  }
+  throw new Error('unreachable');
 }
 
+function extractCommandPrefix(command?: string): string | undefined {
+  if (!command) return undefined;
+  const trimmed = command.trim();
+  if (!trimmed) return undefined;
+  const parts = trimmed.split(/\s+/);
+  const head = parts[0].toLowerCase();
+  if (head === 'npx' && parts.length > 1) return `npx:${parts[1].toLowerCase()}`;
+  return head;
+}
+
+interface InjectionRecord { groupId: string; turnIndex: number; suppressed: boolean; }
+
 function hashGroupId(normalized: string): string {
-  // 简单 hash，同一 normalized 文本始终生成相同 ID
   let h = 0;
-  for (let i = 0; i < normalized.length; i++) {
-    h = ((h << 5) - h + normalized.charCodeAt(i)) | 0;
-  }
+  for (let i = 0; i < normalized.length; i++) h = ((h << 5) - h + normalized.charCodeAt(i)) | 0;
   return `other-${Math.abs(h).toString(36)}`;
 }
 
@@ -34,365 +49,186 @@ export class CodeBrainEngine {
   private pendingQueue: PendingError[] = [];
   private injectionHistory: InjectionRecord[] = [];
   private turnCounter = 0;
+  private extractingPromises = new Map<string, Promise<void>>();
+  private pendingFlush: Promise<void>[] = [];
 
-  constructor(
-    embedding: EmbeddingProvider,
-    llm: LLMProvider,
-    storage: StorageEngine,
-  ) {
-    this.embedding = embedding;
-    this.index = storage.getIndex();
-    this.matcher = new MatchEngine(embedding, llm);
-    this.analyzer = new AIAnalyzer(llm);
+  /** 追踪一个异步任务，供 flush() 等待 */
+  private trackFlush(task: Promise<void>): void {
+    this.pendingFlush.push(task);
+    task.finally(() => {
+      const i = this.pendingFlush.indexOf(task);
+      if (i >= 0) this.pendingFlush.splice(i, 1);
+    });
+  }
+
+  /** 等待所有进行中的异步操作完成（主要用于测试 / 批量验证） */
+  async flush(): Promise<void> {
+    const tasks = [...this.extractingPromises.values(), ...this.pendingFlush];
+    if (tasks.length) await Promise.all(tasks);
+  }
+
+  constructor(embedding: EmbeddingProvider, llm: LLMProvider, storage: StorageEngine) {
+    this.embedding = embedding; this.index = storage.getIndex();
+    this.matcher = new MatchEngine(embedding, llm); this.analyzer = new AIAnalyzer(llm);
     this.storage = storage;
   }
 
   async initialize(): Promise<void> {
-    await this.storage.initialize();
-    this.index = this.storage.getIndex();
+    await this.storage.initialize(); this.index = this.storage.getIndex();
+    logger.info('engine', `initialized groups=${this.index.size}`);
   }
 
-  // ---- 快路径：错误发生时调用（同步） ----
-
   async onError(event: ErrorEvent): Promise<string | null> {
-    // 防循环检查：清理窗口外记录
     this.injectionHistory = this.injectionHistory.filter(
       (r) => this.turnCounter - r.turnIndex < ANTI_LOOP_WINDOW,
     );
-
     const match = await this.matcher.matchSync(event, this.index);
-
     if (!match) {
-      // 未命中 → 入待处理队列
-      this.pendingQueue.push({
-        normalized: event.normalized,
-        sourceFile: event.sourceFile,
-        errorCode: event.errorCode,
-        timestamp: event.timestamp,
-      });
-
-      // [L2 跳过] L0/L1 召回率不足时取消注释启用 LLM 语义匹配兜底
-      // if (this.l2Pending) {
-      //   const l2 = this.l2Pending;
-      //   this.l2Pending = null;
-      //   return this.formatInjection(l2, false);
-      // }
-
-      // 触发异步阶段1（AI 分组，命中则缓存 groupId 供修复时用）
-      this.stage1Group(event);
-
-      // [L2 跳过] L0/L1 召回率不足时取消注释启用 LLM 语义匹配兜底
-      // this.stage2LLMMatch(event).catch(() => {});
-
+      this.pendingQueue.push({ normalized: event.normalized, sourceFile: event.sourceFile, errorCode: event.errorCode, command: event.command, timestamp: event.timestamp });
       return null;
     }
 
-    // 命中 → 防循环判定
-    const groupHits = this.injectionHistory.filter(
-      (r) => r.groupId === match.groupId && !r.suppressed,
-    ).length;
-
-    this.injectionHistory.push({
-      groupId: match.groupId,
-      turnIndex: this.turnCounter,
-      suppressed: false,
-    });
+    const groupHits = this.injectionHistory.filter((r) => r.groupId === match.groupId && !r.suppressed).length;
+    this.injectionHistory.push({ groupId: match.groupId, turnIndex: this.turnCounter, suppressed: false });
 
     if (groupHits >= ANTI_LOOP_THRESHOLD - 1) {
-      // 第 3 次命中 → 抑制
-      this.suppressGroup(match.groupId);
+      logger.warn('engine', `anti-loop: suppress ${match.groupId}`);
+      this.injectionHistory = this.injectionHistory.filter((r) => r.groupId !== match.groupId);
       return null;
     }
 
-    // 入待处理队列（带 groupId，便于 verifiedCount 更新）
-    this.pendingQueue.push({
-      normalized: event.normalized,
-      sourceFile: event.sourceFile,
-      errorCode: event.errorCode,
-      timestamp: event.timestamp,
-      groupId: match.groupId,
-    });
+    if (match.matched.isTrivial) {
+      this.pendingQueue.push({ normalized: event.normalized, sourceFile: event.sourceFile, errorCode: event.errorCode, command: event.command, timestamp: event.timestamp, groupId: match.groupId });
+      return null;
+    }
 
-    const isWarning = groupHits >= 1; // 第 2 次降级
-    return this.formatInjection(match, isWarning);
+    this.pendingQueue.push({ normalized: event.normalized, sourceFile: event.sourceFile, errorCode: event.errorCode, command: event.command, timestamp: event.timestamp, groupId: match.groupId });
+    return this.formatInjection(match, groupHits >= 1);
   }
-
-  // ---- 修复检测 ----
 
   async onSuccess(command: string, exitCode: number): Promise<void> {
     this.turnCounter++;
     if (exitCode !== 0) return;
-
-    // 工具执行成功 → 待处理队列全部视为可能已修复
-    const resolved = [...this.pendingQueue];
-    this.pendingQueue = [];
-
+    const resolved = [...this.pendingQueue]; this.pendingQueue = [];
     for (const pending of resolved) {
       if (pending.groupId) {
         this.incrementVerifiedCount(pending.groupId, command, exitCode);
       } else {
-        // L0/L1 未命中过的错误 → 现在消失了意味着被修复了 → 触发阶段2 入库
-        const event = { normalized: pending.normalized, errorCode: pending.errorCode, raw: '', timestamp: pending.timestamp, command, sourceFile: pending.sourceFile };
-        this.stage2ExtractSolution(event, {
-          error: event,
-          fixTimestamp: Date.now(),
-        }).catch(() => {});
+        const ev = { normalized: pending.normalized, errorCode: pending.errorCode, raw: '', timestamp: pending.timestamp, command: pending.command || command, sourceFile: pending.sourceFile };
+        this.stage2ExtractSolution(ev, { error: ev, fixTimestamp: Date.now() });
       }
     }
   }
 
-  // ---- 修复检测（带 diff） ----
-
-  onFixDetected(fix: FixInfo): void {
-    // 清理 pendingQueue 中对应条目，防止 onSuccess 重复处理
-    this.pendingQueue = this.pendingQueue.filter(
-      (p) => p.normalized !== fix.error.normalized,
-    );
-    // 异步阶段2（fire-and-forget，不阻塞热更新链路）
-    this.stage2ExtractSolution(fix.error, fix).catch(() => {});
+  async onFixDetected(fix: FixInfo): Promise<void> {
+    this.pendingQueue = this.pendingQueue.filter((p) => p.normalized !== fix.error.normalized);
+    this.stage2ExtractSolution(fix.error, fix);
   }
-
-  // 暂存分组结果 + 进行中的 AI 分析 Promise
-  private groupingCache = new Map<string, GroupingResult>();
-  private groupingPromises = new Map<string, Promise<GroupingResult | null>>();
-
-  // 防重入：追踪进行中的 stage2ExtractSolution，避免并发重复提取
-  private extractingPromises = new Map<string, Promise<void>>();
-
-  // [L2 跳过] L2 异步匹配结果缓存，下一条错误时注入。取消注释即可启用 L2 LLM 语义匹配
-  // private l2Pending: MatchResult | null = null;
-
-  // [L2 跳过] 异步 L2：LLM 语义匹配（每次 L0/L1 miss 都触发）
-  // private async stage2LLMMatch(event: ErrorEvent): Promise<void> {
-  //   try {
-  //     const matches = await this.matcher.matchLLM(event, this.index);
-  //     if (matches.length > 0) {
-  //       this.l2Pending = matches[0];
-  //     }
-  //   } catch {
-  //     // 静默失败
-  //   }
-  // }
-
-  // ---- 异步阶段1：错误分组 ----
-
-  private stage1Group(event: ErrorEvent): void {
-    const key = event.normalized + (event.sourceFile || '');
-
-    // 避免对同一错误发起重复 AI 调用
-    if (this.groupingPromises.has(key) || this.groupingCache.has(key)) return;
-
-    const promise = this.analyzer.groupError(
-      event,
-      this.index.getAll().map((k) => ({
-        groupId: k.groupId,
-        summary: k.summary,
-        errorTemplate: k.errorTemplate,
-        occurrences: k.occurrences,
-      })),
-    ).then((result) => {
-      this.groupingCache.set(key, result);
-      this.groupingPromises.delete(key);
-      return result;
-    }).catch(() => {
-      this.groupingPromises.delete(key);
-      return null;
-    });
-
-    this.groupingPromises.set(key, promise);
-  }
-
-  private async getGrouping(event: ErrorEvent): Promise<GroupingResult | null> {
-    const key = event.normalized + (event.sourceFile || '');
-
-    // 已有结果直接返回
-    const cached = this.groupingCache.get(key);
-    if (cached) {
-      this.groupingCache.delete(key);
-      return cached;
-    }
-
-    // 等待进行中的分析
-    const promise = this.groupingPromises.get(key);
-    if (promise) {
-      try {
-        const result = await promise;
-        this.groupingCache.delete(key);
-        return result || null;
-      } catch { /* fall through to retry */ }
-    }
-
-    // 缓存未命中且无进行中请求 → 同步补调（兜底 stage1Group 静默失败 / 网络抖动）
-    if (!this.groupingPromises.has(key)) {
-      const retry = this.analyzer.groupError(
-        event,
-        this.index.getAll().map((k) => ({
-          groupId: k.groupId,
-          summary: k.summary,
-          errorTemplate: k.errorTemplate,
-          occurrences: k.occurrences,
-        })),
-      ).catch(() => null);
-      this.groupingPromises.set(key, retry);
-      try {
-        const result = await retry;
-        if (result) {
-          this.groupingCache.set(key, result);
-        }
-        this.groupingPromises.delete(key);
-        return result;
-      } catch {
-        this.groupingPromises.delete(key);
-        return null;
-      }
-    }
-
-    return null;
-  }
-
-  // ---- 异步阶段2：策略提取 + 入库 ----
 
   private async stage2ExtractSolution(event: ErrorEvent, fix: FixInfo): Promise<void> {
     const dedupKey = event.normalized + (event.sourceFile || '');
-
-    // 防重入：同一错误已在异步提取中，跳过
     if (this.extractingPromises.has(dedupKey)) return;
     const task = this.#doExtractSolution(event, fix, dedupKey);
     this.extractingPromises.set(dedupKey, task);
-    try {
-      await task;
-    } finally {
-      this.extractingPromises.delete(dedupKey);
-    }
+    try { await task; } finally { this.extractingPromises.delete(dedupKey); }
   }
 
   async #doExtractSolution(event: ErrorEvent, fix: FixInfo, dedupKey: string): Promise<void> {
     try {
-      const extraction = await this.analyzer.extractSolution(event, fix);
-      const grouping = await this.getGrouping(event);
+      const merged = await withRetry('extractSolution', () => this.analyzer.extractSolution(event, fix));
 
-      // 若无 AI 分组结果，用 normalized 哈希生成确定性临时 ID
-      const groupId = grouping?.groupId || hashGroupId(event.normalized);
-      const summary = grouping?.groupSummary || 'Pending classification';
-      const template = grouping?.errorTemplate
-        ? preprocess(grouping.errorTemplate)
-        : event.normalized;
+      const groupId = (merged.groupId as string) || hashGroupId(event.normalized);
+      const summary = (merged.groupSummary as string) || 'Pending classification';
+      const template = merged.errorTemplate ? preprocess(merged.errorTemplate as string) : event.normalized;
+      const category = (merged.category as string) || 'other';
+      const isTrivial = merged.isTrivial === true;
 
-      // 查找或创建知识条目
       let existing = this.index.get(groupId);
+      const hasRule = 'abstractRule' in merged && typeof merged.abstractRule === 'string';
 
-      const newSolution: import('./types').Solution = {
-        id: `sol-${Date.now().toString(36)}`,
-        strategy: extraction.strategy,
-        rootCause: extraction.rootCause,
-        avoidanceHint: extraction.avoidanceHint,
-        diff: fix.diff,
-        verifiedCount: 1,
-        suppressed: false,
-        executionTrace: {
-          exitCode: 0,
-          command: event.command || 'unknown',
-          timestamp: Date.now(),
-          dependencyVersions: event.dependencies,
-        },
-      };
-
-      if (existing) {
-        // 策略去重：检查是否已有语义相同的策略
-        const similar = existing.solutions.find(
-          (s) => s.strategy === extraction.strategy && s.rootCause === extraction.rootCause,
-        );
-        if (similar) {
-          similar.verifiedCount++;
-          similar.executionTrace = newSolution.executionTrace;
+      if (hasRule) {
+        if (existing) {
+          existing.abstractRule = merged.abstractRule as string;
+          existing.triggerDescription = merged.triggerDescription as string;
+          existing.preventionAdvice = merged.preventionAdvice as string;
+          existing.occurrences++; existing.lastSeen = Date.now();
+          if (isTrivial) existing.isTrivial = true;
+          if (fix.diff) existing.isRote = true;
         } else {
-          existing.solutions.push(newSolution);
+          existing = {
+            groupId, summary, errorTemplate: template, occurrences: 1,
+            firstSeen: Date.now(), lastSeen: Date.now(), solutions: [], status: 'active',
+            abstractRule: merged.abstractRule as string,
+            triggerDescription: merged.triggerDescription as string,
+            preventionAdvice: merged.preventionAdvice as string,
+            isRote: true, isTrivial,
+            commandPrefix: extractCommandPrefix(event.command),
+            dependencyVersions: event.dependencies,
+            category, isProjectSpecific: false, tags: [], relatedGroupIds: [],
+          };
         }
-        existing.occurrences++;
-        existing.lastSeen = Date.now();
-        existing.dependencyVersions = event.dependencies;
-        existing.solutions.sort((a, b) => b.verifiedCount - a.verifiedCount);
       } else {
-        existing = {
-          groupId,
-          summary,
-          errorTemplate: template,
-          occurrences: 1,
-          firstSeen: Date.now(),
-          lastSeen: Date.now(),
-          solutions: [newSolution],
-          status: 'active',
-          dependencyVersions: event.dependencies,
-          category: grouping?.category || 'other',
-          isProjectSpecific: grouping?.isProjectSpecific || false,
-          tags: [],
-          relatedGroupIds: [],
+        const ext = merged as unknown as import('./types').SolutionExtraction;
+        const newSol: import('./types').Solution = {
+          id: `sol-${Date.now().toString(36)}`, strategy: ext.strategy,
+          rootCause: ext.rootCause, avoidanceHint: ext.avoidanceHint, diff: fix.diff,
+          verifiedCount: 1, suppressed: false,
+          executionTrace: { exitCode: 0, command: event.command || 'unknown', timestamp: Date.now() },
         };
+
+        if (existing) {
+          const similar = existing.solutions.find((s) => s.strategy === ext.strategy && s.rootCause === ext.rootCause);
+          if (similar) similar.verifiedCount++; else existing.solutions.push(newSol);
+          existing.occurrences++; existing.lastSeen = Date.now();
+          existing.solutions.sort((a, b) => b.verifiedCount - a.verifiedCount);
+          if (!existing.commandPrefix) existing.commandPrefix = extractCommandPrefix(event.command);
+          if (isTrivial) existing.isTrivial = true;
+        } else {
+          existing = {
+            groupId, summary, errorTemplate: template, occurrences: 1,
+            firstSeen: Date.now(), lastSeen: Date.now(), solutions: [newSol], status: 'active',
+            isTrivial,
+            commandPrefix: extractCommandPrefix(event.command),
+            dependencyVersions: event.dependencies,
+            category, isProjectSpecific: false, tags: [], relatedGroupIds: [],
+          };
+        }
       }
 
-      // 计算 embedding
-      try {
-        existing.embedding = await this.embedding.embed(event.normalized);
-      } catch { /* embedding 失败不阻塞 */ }
-
+      try { existing.embedding = await this.embedding.embed(event.normalized); } catch {}
       await this.storage.upsert(existing);
-
-      // L0 精确匹配补充索引：用 event.normalized 做 key（errorTemplate 由 AI 生成可能不一致）
       this.index.addTextKey(existing.groupId, event.normalized);
 
-      // 任务③ 规则归纳：同组累计 verifiedCount ≥3 时触发
-      const totalVerified = existing.solutions.reduce((sum, s) => sum + s.verifiedCount, 0);
+      const validSolutions = existing.solutions.filter((s) => s.strategy && s.rootCause);
+      const totalVerified = validSolutions.reduce((sum, s) => sum + s.verifiedCount, 0);
       if (totalVerified >= 3 && !existing.abstractRule) {
-        this.stage3InduceRule(existing.groupId).catch(() => {});
+        this.#doInduceRule(existing.groupId);
       }
-    } catch {
-      // 静默失败
-    }
+    } catch (e) { logger.error('engine', `extractSolution failed`); }
   }
 
-  // ---- 异步阶段3：规则归纳 ----
-
-  private async stage3InduceRule(groupId: string): Promise<void> {
+  async #doInduceRule(groupId: string): Promise<void> {
     try {
       const knowledge = this.index.get(groupId);
       if (!knowledge || knowledge.abstractRule) return;
-
-      const solutions = knowledge.solutions
-        .filter((s) => s.strategy && s.rootCause);
-
+      const solutions = knowledge.solutions.filter((s) => s.strategy && s.rootCause);
       if (solutions.length === 0) return;
-
-      // 用 verifiedCount 作为事件的重复次数
-      const eventsWithSolutions = solutions.map((s) => ({
-        error: {
-          normalized: knowledge.errorTemplate,
-          raw: '',
-          timestamp: knowledge.firstSeen,
-          errorCode: undefined,
-        } as ErrorEvent,
-        solution: {
-          strategy: s.strategy,
-          rootCause: s.rootCause,
-          avoidanceHint: s.avoidanceHint,
-        },
-      }));
-
       const totalVerified = solutions.reduce((sum, s) => sum + s.verifiedCount, 0);
       if (totalVerified < 3) return;
-
-      const rule = await this.analyzer.induceRule(knowledge.summary, eventsWithSolutions);
-
+      const rule = await withRetry('induceRule', () =>
+        this.analyzer.induceRule(knowledge.summary, solutions.map((s) => ({
+          error: { normalized: knowledge.errorTemplate, raw: '', timestamp: knowledge.firstSeen, errorCode: undefined } as ErrorEvent,
+          solution: { strategy: s.strategy, rootCause: s.rootCause, avoidanceHint: s.avoidanceHint },
+        }))),
+      );
       knowledge.abstractRule = rule.abstractRule;
       knowledge.triggerDescription = rule.triggerDescription;
       knowledge.preventionAdvice = rule.preventionAdvice;
-
+      knowledge.isRote = true;
+      logger.info('engine', `rote: ${groupId}`);
       await this.storage.upsert(knowledge);
-    } catch {
-      // 静默失败
-    }
+    } catch (e) { logger.error('engine', `induceRule failed`); }
   }
-
-  // ---- 防循环 ----
 
   private suppressGroup(groupId: string): void {
     const knowledge = this.index.get(groupId);
@@ -400,75 +236,39 @@ export class CodeBrainEngine {
     for (const s of knowledge.solutions) {
       s.suppressed = true;
     }
-    knowledge.status = 'deprecated';
-    this.storage.upsert(knowledge).catch(() => {});
   }
 
   private incrementVerifiedCount(groupId: string, command: string, exitCode: number): void {
     const knowledge = this.index.get(groupId);
     if (!knowledge) return;
     const top = knowledge.solutions[0];
-    if (top) {
-      top.verifiedCount++;
-      top.executionTrace = {
-        exitCode,
-        command,
-        timestamp: Date.now(),
-        dependencyVersions: knowledge.dependencyVersions,
-      };
-      top.suppressed = false; // 重新验证 → 解除抑制
-    }
-    knowledge.occurrences++;
-    knowledge.lastSeen = Date.now();
-    this.storage.upsert(knowledge).catch(() => {});
-
-    // 任务③ 规则归纳：累计 verifiedCount ≥3 时触发
-    const totalVerified = knowledge.solutions.reduce((sum, s) => sum + s.verifiedCount, 0);
-    if (totalVerified >= 3 && !knowledge.abstractRule) {
-      this.stage3InduceRule(knowledge.groupId).catch(() => {});
-    }
+    if (top) { top.verifiedCount++; top.suppressed = false; }
+    knowledge.occurrences++; knowledge.lastSeen = Date.now();
+    this.storage.upsert(knowledge);
+    if (knowledge.isRote) return;
+    if (knowledge.abstractRule) return;
+    const solutions = knowledge.solutions.filter((s) => s.strategy && s.rootCause);
+    const totalVerified = solutions.reduce((sum, s) => sum + s.verifiedCount, 0);
+    if (totalVerified >= 3) this.trackFlush(this.#doInduceRule(groupId));
   }
-
-  // ---- 注入格式化 ----
 
   private formatInjection(match: MatchResult, warning: boolean): string {
     const k = match.matched;
-    const top = k.solutions[0];
-    if (!top) return '';
-
-    const lines = [
-      `[codebrain]`,
-      `fix: ${top.strategy}`,
-      `root: ${top.rootCause}`,
-      `avoid: ${top.avoidanceHint}`,
-      `hit: ${k.occurrences}次 | v: ${top.verifiedCount}`,
-    ];
-
-    if (warning) {
-      lines.push('⚠ 此方案上次未解决该问题');
-    }
-
-    // 规则归纳结果
+    const lines: string[] = [ `[codebrain]` ];
     if (k.abstractRule) {
-      lines.push(`rule: ${k.abstractRule}`);
+      lines.push(`规则: ${k.abstractRule}`);
+      if (k.triggerDescription) lines.push(`触发: ${k.triggerDescription}`);
+      lines.push(`验证: ${k.occurrences}次`);
+    } else {
+      const top = k.solutions[0];
+      if (!top) return '';
+      lines.push(`fix: ${top.strategy}`, `root: ${top.rootCause}`, `avoid: ${top.avoidanceHint}`);
+      lines.push(`hit: ${k.occurrences}次`);
     }
-
-    // 版本差异提醒
-    if (k.dependencyVersions) {
-      const deps = Object.entries(k.dependencyVersions)
-        .map(([n, v]) => `${n}@${v}`)
-        .join(', ');
-      lines.push(`ver: 验证于 ${deps}`);
-    }
-
+    if (warning) lines.push('上次未解决');
     return lines.join('\n');
   }
 
-  get stats(): Promise<import('./types').StorageStats> {
-    return this.storage.stats();
-  }
-
-  get knowledge(): MemoryIndex {
-    return this.index;
-  }
+  get stats(): Promise<import('./types').StorageStats> { return this.storage.stats(); }
+  get knowledge(): MemoryIndex { return this.index; }
 }

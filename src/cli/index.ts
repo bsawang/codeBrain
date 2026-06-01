@@ -12,6 +12,7 @@ async function main() {
     showSplash();
     console.log(`  codebrain setup             一键安装`);
     console.log(`  codebrain daemon <start|stop|status>`);
+    console.log(`  codebrain move <目标目录>    迁移数据文件`);
     console.log(`  codebrain <stats|list|show|search|prune>`);
     console.log(`  codebrain hook <register|unregister> <agent>`);
     return;
@@ -48,6 +49,22 @@ async function main() {
       const icon = r.status === 'ok' ? '✅' : r.status === 'warn' ? '⚠️' : r.status === 'error' ? '❌' : '⏭️';
       console.log(`${icon} ${r.step}: ${r.message}`);
     }
+    return;
+  }
+
+  if (command === 'move') {
+    const target = args[1];
+    if (!target) {
+      console.log('用法: codebrain move <目标目录>');
+      return;
+    }
+    const { moveData } = await import('./move.js');
+    const results = moveData(target);
+    for (const r of results) {
+      const icon = r.status === 'moved' ? '📦' : r.status === 'skipped' ? '⏭️' : '❌';
+      console.log(`${icon} ${r.file}: ${r.message}`);
+    }
+    console.log('\n迁移完成。重启 daemon 生效: codebrain daemon stop && codebrain daemon start');
     return;
   }
 
@@ -232,7 +249,7 @@ async function main() {
 
       default:
         console.log(`未知命令: ${command}`);
-        console.log(`用法: codebrain <stats|list|show|search|prune|setup|daemon|hook>`);
+        console.log(`用法: codebrain <stats|list|show|search|prune|setup|daemon|hook|move>`);
     }
   } finally {
     storage.close();

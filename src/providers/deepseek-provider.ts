@@ -3,6 +3,8 @@
  */
 import { LLMProvider } from './llm-provider';
 
+export const tokenCounts = { input: 0, output: 0 };
+
 interface DeepSeekConfig {
   apiKey: string;
   model?: string;
@@ -15,7 +17,6 @@ export class DeepSeekProvider implements LLMProvider {
   private baseUrl: string;
 
   constructor(config: DeepSeekConfig) {
-    // 优先从环境变量读取（兼容 Claude Code 的 ANTHROPIC_AUTH_TOKEN）
     this.apiKey = config.apiKey
       || process.env.ANTHROPIC_AUTH_TOKEN
       || process.env.DEEPSEEK_API_KEY
@@ -27,7 +28,6 @@ export class DeepSeekProvider implements LLMProvider {
   }
 
   async complete(prompt: string, options?: { temperature?: number; maxTokens?: number }): Promise<string> {
-    // DeepSeek 支持两种端点: /chat/completions (OpenAI 格式) 和 /anthropic/v1/messages
     const endpoint = this.baseUrl.includes('/anthropic')
       ? `${this.baseUrl}/v1/messages`
       : `${this.baseUrl}/chat/completions`;
@@ -69,13 +69,17 @@ export class DeepSeekProvider implements LLMProvider {
 
     const data = await response.json() as Record<string, unknown>;
 
+    // 统计 token 用量（OpenAI 格式返回 usage 字段）
+    const usage = data.usage as { prompt_tokens?: number; completion_tokens?: number } | undefined;
+    if (usage?.prompt_tokens) tokenCounts.input += usage.prompt_tokens;
+    if (usage?.completion_tokens) tokenCounts.output += usage.completion_tokens;
+
     if (isAnthropic) {
-      // Anthropic 格式: { content: [{ type: "text", text: "..." }] }
-      const content = data.content as Array<{ type: string; text: string }> | undefined;
-      return content?.[0]?.text || '';
+      const content = data.content as Array<{ type: string; text?: string }> | undefined;
+      const textBlock = content?.find((c) => c.type === 'text');
+      return textBlock?.text || '';
     }
 
-    // OpenAI 格式: { choices: [{ message: { content: "..." } }] }
     const choices = data.choices as Array<{ message: { content: string } }> | undefined;
     return choices?.[0]?.message?.content || '';
   }

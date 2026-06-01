@@ -1,30 +1,34 @@
-import { ErrorEvent, GroupSummary, GroupingResult, SolutionExtraction, RuleInduction, FixInfo } from './types';
+import { ErrorEvent, SolutionExtraction, RuleInduction, FixInfo } from './types';
 import { LLMProvider } from '../providers/llm-provider';
 
-const GROUPING_PROMPT = `你是开发错误分析专家。
 
-分析以下错误，进行语义分组。关注语义而非文本——根因相同即使措辞不同，归入同一组。
+const MERGED_RULE_PROMPT = `你是一个错误修复分析师。分析以下错误和对应的修复 diff，完成两项任务：① 错误分组 ② 提取抽象修复规则。
 
-当前错误: {{normalized_error}}
-错误码: {{error_code}}
-命令: {{command}}
+这条规则将在同类错误出现时注入给 AI，指导修复方向。
 
-已有分组:
-{{existing_groups}}
+规则要求：
+- 包含判断条件（什么错误特征触发）
+- 包含具体操作步骤（AI 该做什么来修）
+- 不引用具体文件名、变量名、行号等实例信息
+- **禁止使用 <STR>、<FILE>、<FUNC>、<NUM>、<PATH>、<NIL> 等归一化占位符**
+- 输出中的描述应该是对开发者有实际帮助的自然语言
 
-输出 JSON（不要额外解释）:
+错误(normalized): {{normalized_error}}
+Diff: {{diff}}
+
+输出 JSON:
 {
-  "isNewGroup": true或false,
-  "groupId": "已有分组ID则引用，新建则生成 <简短语义描述>，如 null-prop-access 或 type-mismatch。使用英文小写+连字符，不超过4段",
+  "groupId": "简短语义ID，英文小写+连字符",
   "groupSummary": "这类错误的本质（一句话）",
-  "errorTemplate": "剥离项目变量后的通用错误模板",
-  "category": "层级路径，如 typescript/type-mismatch 或 text/trim，最多3层",
-  "isProjectSpecific": true或false
+  "errorTemplate": "剥离变量后的通用模板",
+  "category": "层级路径，如 node/module-not-found",
+  "abstractRule": "抽象修复原则",
+  "triggerDescription": "触发条件",
+  "preventionAdvice": "如何预防",
+  "isTrivial": true或false — 是否为"显然的错误"：只需要执行标准环境操作（如 npm install、kill 进程、chmod、创建目录）就能修复，不需要理解项目上下文
 }`;
 
-const SOLUTION_PROMPT = `你是开发错误分析专家。
-
-分析以下错误修复，提取策略。
+const MERGED_SOLUTION_PROMPT = `分析以下错误，完成两项任务：① 错误分组 ② 提取解决方案。
 
 错误: {{normalized_error}}
 修复前代码: {{code_before}}
@@ -33,9 +37,14 @@ Diff: {{diff}}
 
 输出 JSON:
 {
+  "groupId": "简短语义ID，英文小写+连字符",
+  "groupSummary": "这类错误的本质（一句话）",
+  "errorTemplate": "剥离变量后的通用模板",
+  "category": "层级路径",
   "strategy": "修复策略（做了什么）",
   "rootCause": "根因",
-  "avoidanceHint": "一句话：什么情况/写法会触发这个错误，应避免什么"
+  "avoidanceHint": "一句话：什么情况/写法会触发这个错误",
+  "isTrivial": true或false — 是否为"显然的错误"：只需要执行标准环境操作（如 npm install、kill 进程、chmod、创建目录）就能修复，不需要理解项目上下文
 }`;
 
 export class AIAnalyzer {
@@ -45,49 +54,29 @@ export class AIAnalyzer {
     return template.replace(/\{\{(\w+)\}\}/g, (_, key) => vars[key] || `{{${key}}}`);
   }
 
-  /**
-   * 任务① 错误分组
-   */
-  async groupError(
-    event: ErrorEvent,
-    existingGroups: GroupSummary[],
-  ): Promise<GroupingResult> {
-    const existingStr = existingGroups.length > 0
-      ? existingGroups.map((g) => `[${g.groupId}] ${g.summary} (${g.occurrences}次)`).join('\n')
-      : '(尚无分组)';
 
-    const prompt = this.render(GROUPING_PROMPT, {
-      normalized_error: event.normalized,
-      error_code: event.errorCode || '无',
-      command: event.command || '未知',
-      existing_groups: existingStr,
-    });
-
-    const response = await this.llm.complete(prompt, { temperature: 0, maxTokens: 300 });
-    return this.parseJSON(response) as unknown as GroupingResult;
-  }
-
-  /**
-   * 任务② 修复策略提取
-   */
   async extractSolution(
     event: ErrorEvent,
     fix: FixInfo,
-  ): Promise<SolutionExtraction> {
-    const prompt = this.render(SOLUTION_PROMPT, {
+  ): Promise<Record<string, unknown>> {
+    if (fix.diff) {
+      const prompt = this.render(MERGED_RULE_PROMPT, {
+        normalized_error: event.normalized,
+        diff: fix.diff,
+      });
+      const response = await this.llm.complete(prompt, { temperature: 0, maxTokens: 1000 });
+      return this.parseJSON(response);
+    }
+    const prompt = this.render(MERGED_SOLUTION_PROMPT, {
       normalized_error: event.normalized,
       code_before: fix.codeBefore || '(无)',
       code_after: fix.codeAfter || '(无)',
-      diff: fix.diff || '(无)',
+      diff: '(无)',
     });
-
-    const response = await this.llm.complete(prompt, { temperature: 0, maxTokens: 300 });
-    return this.parseJSON(response) as unknown as SolutionExtraction;
+    const response = await this.llm.complete(prompt, { temperature: 0, maxTokens: 1000 });
+    return this.parseJSON(response);
   }
 
-  /**
-   * 任务③ 规则归纳（积累后触发）
-   */
   async induceRule(
     groupSummary: string,
     events: Array<{ error: ErrorEvent; solution: SolutionExtraction }>,
@@ -96,9 +85,7 @@ export class AIAnalyzer {
       `[${i + 1}] 错误: ${e.error.normalized} | 根因: ${e.solution.rootCause}`,
     ).join('\n');
 
-    const prompt = `你是开发错误分析专家。
-
-从以下多次出现的同类错误中归纳抽象规则。
+    const prompt = `从以下多次出现的同类错误中归纳抽象规则。
 
 分组摘要: ${groupSummary}
 错误事件:
@@ -111,19 +98,62 @@ ${eventsStr}
   "preventionAdvice": "如何预防"
 }`;
 
-    const response = await this.llm.complete(prompt, { temperature: 0, maxTokens: 300 });
+    const response = await this.llm.complete(prompt, { temperature: 0, maxTokens: 1000 });
     return this.parseJSON(response) as unknown as RuleInduction;
   }
 
   private parseJSON(response: string): Record<string, unknown> {
-    try {
-      return JSON.parse(response.trim());
-    } catch {
-      const match = response.match(/\{[\s\S]*\}/);
-      if (match) {
-        return JSON.parse(match[0]);
-      }
-      throw new Error(`Failed to parse AI response: ${response.slice(0, 200)}`);
+    let text = response.trim();
+    text = text.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/, '');
+
+    try { return JSON.parse(text); } catch {}
+
+    const match = text.match(/\{[\s\S]*\}/);
+    if (match) {
+      try { return JSON.parse(match[0]); } catch {}
     }
+
+    try {
+      const repaired = this.repairTruncatedJSON(text);
+      if (repaired) return repaired;
+    } catch {}
+
+    const ngMatch = text.match(/\{[^{}]*\{[\s\S]*?\}[^{}]*\}/);
+    if (ngMatch) {
+      try { return JSON.parse(ngMatch[0]); } catch {}
+    }
+
+    throw new Error(`Failed to parse AI response: ${text.slice(0, 200)}`);
+  }
+
+  private repairTruncatedJSON(text: string): Record<string, unknown> | null {
+    let t = text.replace(/^[^{]*/, '');
+    let depth = 0, inString = false, escape = false, lastValidEnd = 0;
+    for (let i = 0; i < t.length; i++) {
+      const ch = t[i];
+      if (escape) { escape = false; continue; }
+      if (ch === '\\') { escape = true; continue; }
+      if (ch === '"') { inString = !inString; continue; }
+      if (inString) continue;
+      if (ch === '{') { depth++; }
+      else if (ch === '}') {
+        depth--;
+        if (depth === 0) { lastValidEnd = i + 1; }
+      }
+    }
+    if (lastValidEnd > 0 && lastValidEnd < t.length) {
+      const valid = t.slice(0, lastValidEnd);
+      let trimmed = valid;
+      const lastComma = trimmed.lastIndexOf(',');
+      const lastBrace = trimmed.lastIndexOf('}');
+      if (lastComma > 0 && lastComma > lastBrace) {
+        trimmed = trimmed.slice(0, lastComma);
+      }
+      const toClose = (t.slice(0, lastValidEnd).match(/\{/g) || []).length -
+                       (t.slice(0, lastValidEnd).match(/\}/g) || []).length;
+      for (let j = 0; j < toClose; j++) trimmed += '}';
+      try { return JSON.parse(trimmed + '}'); } catch {}
+    }
+    return null;
   }
 }

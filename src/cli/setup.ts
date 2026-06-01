@@ -1,13 +1,13 @@
 /**
  * codebrain setup — 交互式安装向导。
  */
-import { existsSync, mkdirSync, writeFileSync, readFileSync } from 'fs';
+import { existsSync, mkdirSync, writeFileSync, readFileSync, unlinkSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import * as readline from 'readline';
 import { loadConfig } from '../config';
+import { getRcPath } from '../paths.js';
 
-const CODEBRAIN_HOME = join(homedir(), '.codebrain');
 const CLAUDE_HOME = join(homedir(), '.claude');
 const CLAUDE_SETTINGS = join(CLAUDE_HOME, 'settings.json');
 
@@ -81,7 +81,26 @@ export async function setup(): Promise<SetupResult[]> {
   // 创建 readline
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
 
-  // 1. ~/.codebrain/
+  // 0. 数据存储目录
+  const defaultHome = join(homedir(), '.codebrain');
+  const rcPath = getRcPath();
+  const currentRc = existsSync(rcPath) ? readFileSync(rcPath, 'utf-8').trim() : '';
+  const currentHome = currentRc || defaultHome;
+  const dataDir = await ask(rl, '数据存储目录', currentHome);
+
+  let CODEBRAIN_HOME: string;
+  if (dataDir === defaultHome) {
+    // 使用默认路径 → 删除旧 rc 文件，避免残留配置
+    CODEBRAIN_HOME = defaultHome;
+    try { if (existsSync(rcPath)) unlinkSync(rcPath); } catch {}
+  } else {
+    CODEBRAIN_HOME = dataDir;
+    // 持久化到 rc 文件
+    writeFileSync(rcPath, dataDir);
+  }
+  console.log(); // 空行分隔
+
+  // 1. 创建数据目录
   if (!existsSync(CODEBRAIN_HOME)) {
     mkdirSync(CODEBRAIN_HOME, { recursive: true });
     results.push({ step: 'home', status: 'ok', message: `创建 ${CODEBRAIN_HOME}` });

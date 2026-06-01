@@ -1,5 +1,3 @@
-// —— 错误事件与预处理 ——
-
 export interface ErrorEvent {
   raw: string;
   normalized: string;
@@ -12,8 +10,6 @@ export interface ErrorEvent {
   timestamp: number;
   sessionId?: string;
 }
-
-// —— 知识模型 ——
 
 export interface ErrorKnowledge {
   groupId: string;
@@ -29,6 +25,10 @@ export interface ErrorKnowledge {
   triggerDescription?: string;
   status: 'active' | 'deprecated';
   dependencyVersions?: Record<string, string>;
+  commandPrefix?: string;
+  isRote?: boolean;
+  roteCount?: number;
+  isTrivial?: boolean;
   category: string;
   isProjectSpecific: boolean;
   tags: string[];
@@ -52,16 +52,13 @@ export interface Solution {
   applicableConditions?: string;
 }
 
-// —— 匹配引擎 ——
-
 export interface MatchResult {
   groupId: string;
   relevance: number;
   reason: string;
   matched: ErrorKnowledge;
+  confidence?: 'high' | 'medium' | 'low';
 }
-
-// —— AI 分析层 ——
 
 export interface GroupSummary {
   groupId: string;
@@ -91,8 +88,6 @@ export interface RuleInduction {
   preventionAdvice: string;
 }
 
-// —— Agent 会话 ——
-
 export interface AgentSession {
   sessionId: string;
   messages: { role: string; content: string; timestamp: number }[];
@@ -113,17 +108,14 @@ export interface FixInfo {
   fixTimestamp: number;
 }
 
-// —— 待处理队列 ——
-
 export interface PendingError {
   normalized: string;
   sourceFile?: string;
   errorCode?: string;
-  groupId?: string;             // L0/L1 命中时填入，用于 verifiedCount 更新
+  command?: string;
+  groupId?: string;
   timestamp: number;
 }
-
-// —— 存储 ——
 
 export interface StorageStats {
   totalGroups: number;

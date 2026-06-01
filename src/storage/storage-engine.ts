@@ -1,13 +1,10 @@
 import { ErrorKnowledge, StorageStats } from '../core/types';
 import { MemoryIndex } from '../core/memory-index';
 import { SQLiteStore } from './sqlite-store';
-import path from 'path';
-import os from 'os';
-
-const CODEBRAIN_HOME = path.join(os.homedir(), '.codebrain');
+import { getDbPath } from '../paths.js';
 
 export function getDefaultDbPath(): string {
-  return path.join(CODEBRAIN_HOME, 'knowledge.db');
+  return getDbPath();
 }
 
 export class StorageEngine {
