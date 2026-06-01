@@ -271,4 +271,34 @@ export class CodeBrainEngine {
 
   get stats(): Promise<import('./types').StorageStats> { return this.storage.stats(); }
   get knowledge(): MemoryIndex { return this.index; }
+
+  /** 删除知识条目（内存 + 磁盘） */
+  async deleteKnowledge(groupId: string): Promise<void> {
+    this.storage.delete(groupId);
+  }
+
+  /** 切换抑制状态 */
+  async toggleSuppress(groupId: string, suppressed: boolean): Promise<void> {
+    const k = this.index.get(groupId);
+    if (!k) throw new Error(`Knowledge not found: ${groupId}`);
+    for (const s of k.solutions) s.suppressed = suppressed;
+    k.status = suppressed ? 'deprecated' : 'active';
+    await this.storage.upsert(k);
+  }
+
+  /** 切换常用标记 */
+  async toggleRote(groupId: string, isRote: boolean): Promise<void> {
+    const k = this.index.get(groupId);
+    if (!k) throw new Error(`Knowledge not found: ${groupId}`);
+    k.isRote = isRote;
+    await this.storage.upsert(k);
+  }
+
+  /** 切换琐碎标记 */
+  async toggleTrivial(groupId: string, isTrivial: boolean): Promise<void> {
+    const k = this.index.get(groupId);
+    if (!k) throw new Error(`Knowledge not found: ${groupId}`);
+    k.isTrivial = isTrivial;
+    await this.storage.upsert(k);
+  }
 }

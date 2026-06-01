@@ -27,10 +27,12 @@
   "types": "./dist/index.d.ts",
   "files": [
     "dist/",
+    "webui/dist/",
     "README.md"
   ],
   "scripts": {
-    "build": "tsc && node -e \"var f=require('fs'),p=require('path');f.mkdirSync('dist/webui',{recursive:true});f.copyFileSync('src/webui/index.html','dist/webui/index.html')\"",
+    "build": "tsc && npm run build:webui",
+    "build:webui": "cd webui && npx vite build",
     "dev": "tsc --watch",
     "start": "node dist/cli/index.js",
     "prepublishOnly": "npm run build && node -e \"['dist/test-integration.js','dist/test-integration.js.map','dist/test-integration.d.ts','dist/test-live-llm.js','dist/test-live-llm.js.map','dist/test-live-llm.d.ts'].forEach(x=>{try{require('fs').unlinkSync(x)}catch(e){}})\""

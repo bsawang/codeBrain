@@ -2,21 +2,44 @@
 import { StorageEngine } from '../storage/storage-engine';
 import { loadConfig } from '../config';
 
+function askUser(question: string): Promise<string> {
+  return new Promise((resolve) => {
+    process.stdout.write(question);
+    process.stdin.once('data', (data) => {
+      resolve(data.toString().trim());
+    });
+  });
+}
+
 async function main() {
   const args = process.argv.slice(2);
   const command = args[0] || '';
 
-  // 无参数 → splash
-  if (!command) {
-    const { showSplash } = await import('./splash.js');
-    showSplash();
-    console.log(`  codebrain setup             一键安装`);
-    console.log(`  codebrain daemon <start|stop|status>`);
-    console.log(`  codebrain move <目标目录>    迁移数据文件`);
-    console.log(`  codebrain <stats|list|show|search|prune>`);
-    console.log(`  codebrain hook <register|unregister> <agent>`);
-    return;
-  }
+function showHelp(): void {
+  console.log(`  codebrain setup             一键安装`);
+  console.log(`  codebrain daemon <start|stop|status|restart>`);
+  console.log(`  codebrain web               在浏览器中打开 WebUI`);
+  console.log(`  codebrain move <目标目录>    迁移数据文件`);
+  console.log(`  codebrain findPath           显示数据目录和诊断信息`);
+  console.log(`  codebrain <stats|list|show|search|prune|tree>`);
+  console.log(`  codebrain hook <register|unregister> <agent>`);
+}
+
+// 无参数 → splash
+if (!command) {
+  const { showSplash } = await import('./splash.js');
+  showSplash();
+  showHelp();
+  return;
+}
+
+// 帮助参数
+if (command === '/?' || command === '--help' || command === '-h') {
+  const { showSplash } = await import('./splash.js');
+  showSplash();
+  showHelp();
+  return;
+}
 
   // ---- 无状态命令 ----
 
@@ -38,6 +61,39 @@ async function main() {
       const port = getDaemonPort();
       console.log(port ? `运行中 (port ${port})` : '未运行');
       return;
+    }
+    if (sub === 'restart') {
+      const { stopDaemon } = await import('../daemon/server.js');
+      const { spawn } = await import('child_process');
+      stopDaemon();
+      await new Promise((r) => setTimeout(r, 500));
+      const child = spawn(process.execPath, [process.argv[1], 'daemon', 'start'], {
+        detached: true,
+        stdio: 'ignore',
+        windowsHide: true,
+      });
+      child.unref();
+      console.log('Daemon 已重启');
+      return;
+    }
+    return;
+  }
+
+  if (command === 'web') {
+    const { getDaemonPort, startDaemon } = await import('../daemon/server.js');
+    let port = getDaemonPort();
+    if (!port) {
+      console.log('Daemon 未运行，正在启动...');
+      port = await startDaemon();
+      console.log(`Daemon 已启动: http://127.0.0.1:${port}`);
+    }
+    const url = `http://127.0.0.1:${port}`;
+    console.log(`正在打开 ${url} ...`);
+    const { execSync } = await import('child_process');
+    try {
+      execSync(`start "" "${url}"`, { stdio: 'ignore' });
+    } catch {
+      console.log(`请手动访问: ${url}`);
     }
     return;
   }
@@ -64,7 +120,58 @@ async function main() {
       const icon = r.status === 'moved' ? '📦' : r.status === 'skipped' ? '⏭️' : '❌';
       console.log(`${icon} ${r.file}: ${r.message}`);
     }
-    console.log('\n迁移完成。重启 daemon 生效: codebrain daemon stop && codebrain daemon start');
+
+    // 检查 daemon 是否运行，询问重启
+    const { getDaemonPort } = await import('../daemon/server.js');
+    const port = getDaemonPort();
+    if (port) {
+      console.log(`\n⚠️  Daemon 正在运行 (port ${port})，需要重启才能使用新路径。`);
+      const answer = await askUser('重启 daemon？(Y/n) ');
+      if (answer === '' || answer.toLowerCase() === 'y' || answer.toLowerCase() === 'yes') {
+        console.log('正在停止 daemon...');
+        const { stopDaemon } = await import('../daemon/server.js');
+        stopDaemon();
+        // 等旧进程释放端口
+        await new Promise((r) => setTimeout(r, 500));
+        console.log('正在启动 daemon...');
+        const { startDaemon } = await import('../daemon/server.js');
+        const newPort = await startDaemon();
+        console.log(`Daemon 已重启 → http://127.0.0.1:${newPort}`);
+      } else {
+        console.log('跳过重启。手动执行: codebrain daemon stop && codebrain daemon start');
+      }
+    }
+    return;
+  }
+
+  if (command === 'findPath') {
+    const { getCodeBrainHome, getDbPath, getConfigPath, getRcPath } = await import('../paths.js');
+    const { existsSync } = await import('fs');
+
+    const home = getCodeBrainHome();
+    const dbPath = getDbPath();
+    const configPath = getConfigPath();
+    const rcFile = getRcPath();
+
+    // 检测优先级链
+    const envVar = process.env.CODEBRAIN_HOME;
+    const rcExists = existsSync(rcFile);
+    const rcContent = rcExists ? require('fs').readFileSync(rcFile, 'utf-8').trim() : '';
+    const defaultPath = require('path').join(require('os').homedir(), '.codebrain');
+
+    const bar = '─'.repeat(48);
+    console.log(`\n${bar}`);
+    console.log('  codebrain 路径诊断');
+    console.log(`${bar}`);
+    console.log('  优先级链:');
+    console.log(`    ① CODEBRAIN_HOME    ${envVar ? `✅ ${envVar}` : '❌ 未设置'}`);
+    console.log(`    ② ~/.codebrain_rc  ${rcExists ? `✅ ${rcContent}` : '❌ 不存在'}`);
+    console.log(`    ③ ~/.codebrain/    ${defaultPath}`);
+    console.log(`${bar}`);
+    console.log(`  生效路径: ${home}`);
+    console.log(`  DB 文件:  ${dbPath}${existsSync(dbPath) ? ' ✅' : ' ❌ 不存在'}`);
+    console.log(`  配置文件: ${configPath}${existsSync(configPath) ? ' ✅' : ' ❌ 不存在'}`);
+    console.log(`${bar}\n`);
     return;
   }
 
@@ -89,24 +196,26 @@ async function main() {
 
       case 'list': {
         const tag = args.includes('--tag') ? args[args.indexOf('--tag') + 1] : undefined;
+        const showAll = args.includes('--all') || args.includes('-a');
         const all = index.getAll()
           .filter((k) => (tag ? k.tags.includes(tag) : true))
           .sort((a, b) => b.occurrences - a.occurrences);
 
         if (all.length === 0) { console.log('知识库为空。'); break; }
 
+        const limit = showAll ? all.length : 20;
         const bar = '─'.repeat(52);
         console.log(`\n${bar}`);
-        console.log(` ${all.length} 组`);
+        console.log(` ${all.length} 组${showAll ? '' : ' (显示前20条, --all/-a 查看全部)'}`);
         console.log(bar);
 
-        for (const k of all.slice(0, 20)) {
+        for (const k of all.slice(0, limit)) {
           const suppressed = k.solutions.some((s) => s.suppressed);
           const icon = suppressed ? '⊘' : '●';
           const trunc = (s: string, n: number) => s.length > n ? s.slice(0, n) + '…' : s;
           console.log(` ${icon} ${k.groupId} | ${trunc(k.summary, 40)}`);
         }
-        if (all.length > 20) console.log(`  ... 还有 ${all.length - 20} 条`);
+        if (!showAll && all.length > 20) console.log(`  ... 还有 ${all.length - 20} 条`);
         console.log(`${bar}\n`);
         break;
       }

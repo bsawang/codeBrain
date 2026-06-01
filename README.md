@@ -69,14 +69,19 @@ codebrain hook unregister claude-code # 卸载
 ### CLI 命令
 
 ```bash
-codebrain                 # 帮助
-codebrain setup           # 一键安装
-codebrain stats           # 知识库统计
-codebrain list            # 分组列表（按热度排序）
-codebrain tree            # 按分类树状展示
-codebrain show <groupId>  # 分组详情
-codebrain search <kw>     # 搜索
-codebrain prune           # 清理已弃用条目
+codebrain [/|--help|-h]       # 帮助
+codebrain setup               # 一键安装
+codebrain daemon <start|stop|status|restart>
+codebrain web                 # 在浏览器中打开 WebUI
+codebrain move <目标目录>      # 迁移数据文件（含 log + 交互式 daemon 重启提示）
+codebrain findPath             # 显示数据目录和路径诊断信息
+codebrain stats                # 知识库统计
+codebrain list [--all|-a]     # 分组列表（默认前20条，--all 查看全部）
+codebrain tree                 # 按分类树状展示
+codebrain show <groupId>      # 分组详情
+codebrain search <kw>         # 搜索
+codebrain prune                # 清理已弃用条目
+codebrain hook <register|unregister> <agent>
 ```
 
 ### Web UI

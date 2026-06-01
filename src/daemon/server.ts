@@ -100,18 +100,50 @@ export async function startDaemon(): Promise<number> {
         } else if (req.url === '/health' && req.method === 'GET') {
           send(res, { injected: null });
         } else if (req.url === '/' || req.url === '/ui') {
-          const uiPath = join(__dirname, '..', 'webui', 'index.html');
-          try {
-            const html = readFileSync(uiPath, 'utf-8');
+          const uiDir = join(__dirname, '..', '..', 'webui');
+          // Vite build result 优先，否则用源码
+          const candidates = [join(uiDir, 'dist', 'index.html'), join(uiDir, 'index.html')];
+          let html: string | null = null;
+          for (const p of candidates) {
+            try { html = readFileSync(p, 'utf-8'); break; } catch {}
+          }
+          if (html) {
             res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
             res.end(html);
-          } catch { res.writeHead(404); res.end('UI not found'); }
+          } else {
+            res.writeHead(404);
+            res.end('UI not found');
+          }
         } else if (req.url === '/api/daemon' && req.method === 'GET') {
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ pid: process.pid, port: actualPort, uptime: Math.floor(process.uptime()), running: true }));
         } else if (req.url === '/api/config' && req.method === 'GET') {
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify(loadConfig()));
+        } else if (req.url === '/api/knowledge/delete' && req.method === 'POST') {
+          const body = await parseBody(req) as any;
+          const eng = await getEngine();
+          await eng.deleteKnowledge(body.groupId);
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ deleted: body.groupId }));
+        } else if (req.url === '/api/knowledge/suppress' && req.method === 'POST') {
+          const body = await parseBody(req) as any;
+          const eng = await getEngine();
+          await eng.toggleSuppress(body.groupId, body.suppressed);
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ updated: body.groupId, suppressed: body.suppressed }));
+        } else if (req.url === '/api/knowledge/rote' && req.method === 'POST') {
+          const body = await parseBody(req) as any;
+          const eng = await getEngine();
+          await eng.toggleRote(body.groupId, body.isRote);
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ updated: body.groupId, isRote: body.isRote }));
+        } else if (req.url === '/api/knowledge/trivial' && req.method === 'POST') {
+          const body = await parseBody(req) as any;
+          const eng = await getEngine();
+          await eng.toggleTrivial(body.groupId, body.isTrivial);
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ updated: body.groupId, isTrivial: body.isTrivial }));
         } else {
           send(res, { injected: null, error: 'not found' }, 404);
         }

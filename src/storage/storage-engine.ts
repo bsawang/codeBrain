@@ -38,6 +38,11 @@ export class StorageEngine {
     this.disk.upsert(knowledge);
   }
 
+  delete(groupId: string): void {
+    this.index.remove(groupId);
+    this.disk.delete(groupId);
+  }
+
   async stats(): Promise<StorageStats> {
     return {
       totalGroups: this.index.size,

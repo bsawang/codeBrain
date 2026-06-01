@@ -36,7 +36,7 @@ export function moveData(targetDir: string): MoveResult[] {
     mkdirSync(target, { recursive: true });
   }
 
-  const files = ['config.yaml', 'knowledge.db'];
+  const files = ['config.yaml', 'knowledge.db', 'codebrain.log'];
 
   for (const file of files) {
     const srcPath = `${source}/${file}`;

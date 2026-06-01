@@ -19,6 +19,8 @@ node_modules/
 
 # Build
 dist/
+webui/dist/
+webui/node_modules/
 
 # IDE
 .idea/

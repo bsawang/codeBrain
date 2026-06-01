@@ -26,8 +26,17 @@ export interface ErrorKnowledge {
   status: 'active' | 'deprecated';
   dependencyVersions?: Record<string, string>;
   commandPrefix?: string;
+  /**
+   * 已熟知标记。引擎已为该模式归纳出抽象规则，命中时直接注入规则，
+   * 不再触发 solution 提取流程。由 induceRule 成功后自动设置，也可手动标记。
+   */
   isRote?: boolean;
+  /** 累计熟知的命中次数（预留） */
   roteCount?: number;
+  /**
+   * 琐碎标记。错误过于基础（拼写、缩进等），匹配到也不返回注入内容，
+   * 仅记录出现次数，避免无效干扰。
+   */
   isTrivial?: boolean;
   category: string;
   isProjectSpecific: boolean;

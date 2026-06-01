@@ -1,0 +1,898 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CODEBRAIN · 神经知识库</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* ============================================
+   ROOT — Dark Cyberpunk Palette
+   ============================================ */
+:root {
+  --bg-deep: #07070d;
+  --bg-surface: #0c0c18;
+  --bg-card: #111122;
+  --bg-card-hover: #18182e;
+  --bg-elevated: #1a1a30;
+  --border-subtle: rgba(100, 140, 255, 0.08);
+  --border-accent: rgba(0, 230, 255, 0.15);
+
+  --cyan: #00e6ff;
+  --cyan-dim: rgba(0, 230, 255, 0.4);
+  --amber: #f59e0b;
+  --coral: #f43f5e;
+  --emerald: #10b981;
+  --violet: #8b5cf6;
+  --gray-100: #e8e8f0;
+  --gray-200: #c4c4d0;
+  --gray-400: #8888a0;
+  --gray-600: #555570;
+  --gray-800: #2a2a40;
+
+  --font-sans: 'DM Sans', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+}
+
+/* ============================================
+   RESET & BASE
+   ============================================ */
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html{font-size:15px}
+body{
+  font-family:var(--font-sans);
+  background:var(--bg-deep);
+  color:var(--gray-100);
+  display:flex;
+  height:100vh;
+  overflow:hidden;
+  line-height:1.5;
+  -webkit-font-smoothing:antialiased;
+}
+::selection{background:rgba(0,230,255,0.25);color:#fff}
+::-webkit-scrollbar{width:5px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--gray-800);border-radius:4px}
+::-webkit-scrollbar-thumb:hover{background:var(--gray-600)}
+
+/* ============================================
+   AMBIENT BACKGROUND
+   ============================================ */
+.bg-canvas{
+  position:fixed;inset:0;z-index:0;overflow:hidden;pointer-events:none;
+}
+.bg-grid{
+  position:absolute;inset:0;
+  background-image:
+    linear-gradient(rgba(0,230,255,0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0,230,255,0.03) 1px, transparent 1px);
+  background-size:40px 40px;
+}
+.bg-orb{
+  position:absolute;border-radius:50%;filter:blur(120px);opacity:0.3;
+  animation:orbFloat 20s ease-in-out infinite;
+}
+.bg-orb:nth-child(2){width:600px;height:600px;background:radial-gradient(circle,rgba(0,230,255,0.15),transparent 70%);top:-200px;right:-100px;animation-delay:-5s}
+.bg-orb:nth-child(3){width:500px;height:500px;background:radial-gradient(circle,rgba(139,92,246,0.1),transparent 70%);bottom:-150px;left:-100px;animation-delay:-10s}
+.bg-orb:nth-child(4){width:400px;height:400px;background:radial-gradient(circle,rgba(245,158,11,0.06),transparent 70%);top:40%;left:50%;animation-delay:-15s}
+@keyframes orbFloat{
+  0%,100%{transform:translate(0,0) scale(1)}
+  25%{transform:translate(40px,-60px) scale(1.05)}
+  50%{transform:translate(-20px,30px) scale(0.95)}
+  75%{transform:translate(50px,20px) scale(1.02)}
+}
+
+/* ============================================
+   SIDEBAR
+   ============================================ */
+.sidebar{
+  position:relative;z-index:1;
+  width:230px;display:flex;flex-direction:column;flex-shrink:0;
+  background:rgba(12,12,24,0.85);
+  backdrop-filter:blur(20px);
+  border-right:1px solid var(--border-subtle);
+  padding:0;
+}
+.sidebar-brand{
+  padding:22px 20px 18px;
+  border-bottom:1px solid var(--border-subtle);
+}
+.sidebar-brand h1{
+  font-size:15px;font-weight:700;letter-spacing:0.15em;
+  background:linear-gradient(135deg,var(--cyan),rgba(0,230,255,0.5));
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;
+  background-clip:text;
+}
+.sidebar-brand span{
+  display:block;font-size:10px;color:var(--gray-600);
+  letter-spacing:0.08em;margin-top:2px;
+  -webkit-text-fill-color:var(--gray-600);
+}
+.sidebar-nav{flex:1;overflow-y:auto;padding:12px 10px;}
+.nav-item{
+  display:flex;align-items:center;gap:10px;
+  padding:10px 14px;border-radius:var(--radius-sm);
+  cursor:pointer;font-size:13px;font-weight:500;
+  color:var(--gray-400);margin-bottom:2px;
+  transition:all 0.2s ease;position:relative;
+}
+.nav-item:hover{color:var(--gray-100);background:rgba(0,230,255,0.04);}
+.nav-item.active{
+  color:var(--cyan);background:rgba(0,230,255,0.08);
+}
+.nav-item.active::before{
+  content:'';position:absolute;left:0;top:4px;bottom:4px;width:2.5px;
+  background:var(--cyan);border-radius:2px;
+}
+
+/* ============================================
+   MAIN LAYOUT
+   ============================================ */
+.main{position:relative;z-index:1;flex:1;display:flex;flex-direction:column;overflow:hidden;}
+.header{
+  padding:10px 24px;
+  border-bottom:1px solid var(--border-subtle);
+  display:flex;align-items:center;gap:16px;
+  font-size:12px;color:var(--gray-400);flex-wrap:wrap;
+  background:rgba(7,7,13,0.6);backdrop-filter:blur(12px);
+}
+.header-indicator{
+  display:flex;align-items:center;gap:5px;
+  font-family:var(--font-mono);font-size:11px;
+}
+.header-dot{width:6px;height:6px;border-radius:50%;display:inline-block;}
+.header-dot.on{background:var(--emerald);box-shadow:0 0 6px rgba(16,185,129,0.5);}
+.header-dot.off{background:var(--coral);box-shadow:0 0 6px rgba(244,63,94,0.5);}
+.header input{
+  background:rgba(255,255,255,0.04);border:1px solid var(--border-subtle);
+  border-radius:20px;padding:6px 14px;color:var(--gray-100);
+  font-size:12px;width:180px;outline:none;font-family:var(--font-sans);
+  transition:all 0.2s;
+}
+.header input:focus{border-color:var(--cyan-dim);background:rgba(0,230,255,0.04);}
+.header input::placeholder{color:var(--gray-600);}
+.header select{
+  background:rgba(255,255,255,0.04);border:1px solid var(--border-subtle);
+  border-radius:20px;padding:6px 12px;color:var(--gray-200);
+  font-size:11px;outline:none;cursor:pointer;font-family:var(--font-sans);
+}
+.header select:focus{border-color:var(--cyan-dim);}
+
+.content{
+  flex:1;overflow-y:auto;padding:24px 28px;
+  scroll-behavior:smooth;
+}
+
+/* ============================================
+   STATS CARDS
+   ============================================ */
+.stats{
+  display:grid;grid-template-columns:repeat(4,1fr);gap:14px;
+  margin-bottom:24px;
+}
+.stat-card{
+  background:rgba(17,17,34,0.6);backdrop-filter:blur(12px);
+  border:1px solid var(--border-subtle);
+  border-radius:var(--radius-lg);padding:18px 20px;
+  transition:all 0.3s ease;position:relative;overflow:hidden;
+}
+.stat-card::after{
+  content:'';position:absolute;top:0;left:0;right:0;height:2px;
+  background:linear-gradient(90deg,transparent,var(--cyan-dim),transparent);
+  opacity:0;transition:opacity 0.3s;
+}
+.stat-card:hover::after{opacity:1;}
+.stat-card:hover{
+  border-color:var(--border-accent);transform:translateY(-2px);
+  background:rgba(17,17,34,0.8);
+}
+.stat-card .label{font-size:10px;color:var(--gray-600);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:6px;font-weight:500;}
+.stat-card .value{font-size:28px;font-weight:700;font-family:var(--font-mono);letter-spacing:-0.02em;}
+.stat-card .sub{font-size:11px;color:var(--gray-600);margin-top:4px;}
+.stat-card .value.cyan{color:var(--cyan)}
+.stat-card .value.emerald{color:var(--emerald)}
+.stat-card .value.coral{color:var(--coral)}
+.stat-card .value.amber{color:var(--amber)}
+
+/* ============================================
+   PANELS
+   ============================================ */
+.panels{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
+.panel{
+  background:rgba(17,17,34,0.6);backdrop-filter:blur(12px);
+  border:1px solid var(--border-subtle);border-radius:var(--radius-lg);
+  overflow:hidden;transition:border-color 0.3s;
+}
+.panel:hover{border-color:var(--border-accent);}
+.panel-header{
+  padding:14px 18px;
+  border-bottom:1px solid var(--border-subtle);
+  font-size:11px;font-weight:600;color:var(--gray-400);
+  text-transform:uppercase;letter-spacing:0.08em;
+}
+.panel-body{padding:4px 0;}
+.hot-item{
+  display:flex;align-items:center;gap:12px;
+  padding:10px 18px;cursor:pointer;font-size:13px;
+  transition:all 0.15s ease;position:relative;
+}
+.hot-item:hover{background:rgba(0,230,255,0.03);}
+.hot-item:active{background:rgba(0,230,255,0.05);}
+.hot-rank{
+  width:24px;text-align:center;font-weight:700;
+  font-family:var(--font-mono);font-size:12px;color:var(--gray-600);
+}
+.hot-rank.r1{color:var(--coral)}
+.hot-rank.r2{color:var(--amber)}
+.hot-rank.r3{color:var(--violet)}
+.hot-count{font-size:11px;color:var(--gray-600);font-family:var(--font-mono);min-width:36px;text-align:right;}
+.hot-date{font-size:10px;color:var(--gray-600);}
+
+/* ============================================
+   TREE VIEW
+   ============================================ */
+.tree{font-size:13px;animation:fadeIn 0.3s ease;}
+.tree-folder-bordered{
+  border:1px solid var(--border-subtle);border-radius:var(--radius-md);
+  overflow:hidden;margin:8px 0;
+  background:rgba(17,17,34,0.3);
+}
+.tree-folder-nested{margin-left:18px;}
+.tree-folder-header{
+  padding:10px 16px;cursor:pointer;display:flex;align-items:center;
+  gap:8px;user-select:none;transition:background 0.15s;
+  font-size:12px;
+}
+.tree-folder-header:hover{background:rgba(0,230,255,0.04);}
+.tree-toggle{transition:transform 0.3s ease;display:inline-block;font-size:13px;}
+.tree-item{
+  padding:8px 16px;cursor:pointer;display:flex;align-items:center;gap:8px;
+  margin:3px 10px 3px 18px;
+  border:1px solid var(--border-subtle);border-radius:var(--radius-sm);
+  transition:all 0.2s ease;font-size:12px;
+}
+.tree-item:hover{background:rgba(0,230,255,0.04);border-color:var(--border-accent);transform:translateX(3px);}
+.tree-icon{font-size:13px;width:18px;text-align:center;}
+.tree-count{font-size:10px;color:var(--gray-600);font-family:var(--font-mono);}
+.tree-children{padding:0 0 6px 0;}
+.tree-children.collapsed{display:none;}
+
+/* ============================================
+   DETAIL VIEW
+   ============================================ */
+.detail-view{
+  animation:slideUp 0.3s ease;
+}
+.detail-card{
+  background:rgba(17,17,34,0.6);backdrop-filter:blur(12px);
+  border:1px solid var(--border-subtle);border-radius:var(--radius-xl);
+  padding:24px 28px;max-width:720px;
+  transition:border-color 0.3s;
+}
+.detail-card:hover{border-color:var(--border-accent);}
+.detail-card h2{font-size:18px;font-weight:600;margin-bottom:2px;letter-spacing:-0.01em;}
+.detail-meta{
+  font-size:12px;color:var(--gray-400);margin-bottom:16px;
+  display:flex;gap:14px;flex-wrap:wrap;align-items:center;
+}
+.detail-error-template{
+  font-size:12px;color:var(--gray-600);margin-bottom:20px;
+  word-break:break-all;font-family:var(--font-mono);
+  padding:12px 16px;background:rgba(0,0,0,0.3);
+  border-radius:var(--radius-sm);border:1px solid var(--border-subtle);
+  line-height:1.6;
+}
+.solution{
+  background:rgba(0,0,0,0.25);border:1px solid var(--border-subtle);
+  border-radius:var(--radius-md);padding:14px 18px;margin-bottom:10px;
+  transition:border-color 0.2s;
+}
+.solution:hover{border-color:var(--border-accent);}
+.solution-header{
+  display:flex;align-items:center;gap:8px;margin-bottom:8px;
+  font-size:12px;font-weight:500;
+}
+.solution-badge{
+  font-size:9px;padding:2px 8px;border-radius:10px;font-weight:600;
+  font-family:var(--font-mono);letter-spacing:0.02em;
+}
+.solution-badge.ok{background:rgba(16,185,129,0.12);color:var(--emerald);border:1px solid rgba(16,185,129,0.2);}
+.solution-badge.warn{background:rgba(245,158,11,0.12);color:var(--amber);border:1px solid rgba(245,158,11,0.2);}
+.solution-badge.suppress{background:rgba(244,63,94,0.12);color:var(--coral);border:1px solid rgba(244,63,94,0.2);}
+.solution-field{margin-top:6px;font-size:12px;line-height:1.6;color:var(--gray-200);}
+.solution-field .key{
+  display:inline-block;min-width:44px;
+  color:var(--gray-600);font-family:var(--font-mono);font-size:10px;
+  text-transform:uppercase;letter-spacing:0.05em;
+}
+.trace{
+  font-size:11px;color:var(--gray-600);margin-top:8px;
+  padding:6px 10px;background:rgba(0,0,0,0.3);
+  border-radius:var(--radius-sm);font-family:var(--font-mono);
+  border:1px solid var(--border-subtle);
+}
+.tag{
+  display:inline-block;padding:3px 10px;border-radius:12px;
+  font-size:10px;font-weight:500;
+  background:rgba(255,255,255,0.04);color:var(--gray-400);
+  border:1px solid var(--border-subtle);
+  transition:all 0.2s;
+}
+.tag:hover{border-color:var(--cyan-dim);color:var(--cyan);}
+
+/* Settings */
+.setting-rows{padding:4px 0;}
+.setting-row{display:flex;justify-content:space-between;align-items:center;padding:10px 18px;font-size:13px;border-bottom:1px solid var(--border-subtle);}
+.setting-row:last-child{border-bottom:none;}
+.setting-row span:first-child{color:var(--gray-600);}
+.tag-rote{border-color:rgba(16,185,129,0.3);color:var(--emerald);}
+.tag-trivial{border-color:rgba(245,158,11,0.3);color:var(--amber);}
+
+/* ============================================
+   ACTION BUTTONS
+   ============================================ */
+.detail-actions{display:flex;gap:8px;margin:20px 0 4px;flex-wrap:wrap;}
+.detail-actions button{
+  background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);
+  border-radius:var(--radius-sm);color:var(--gray-200);
+  cursor:pointer;font-size:11px;font-weight:500;
+  padding:8px 16px;transition:all 0.2s ease;
+  font-family:var(--font-sans);letter-spacing:0.01em;
+}
+.detail-actions button:hover{
+  background:rgba(0,230,255,0.06);border-color:var(--cyan-dim);color:var(--cyan);
+  transform:translateY(-1px);
+}
+.detail-actions button.warn:hover{
+  background:rgba(245,158,11,0.08);border-color:rgba(245,158,11,0.4);color:var(--amber);
+}
+.detail-actions button.danger:hover{
+  background:rgba(244,63,94,0.08);border-color:rgba(244,63,94,0.4);color:var(--coral);
+}
+
+/* Toggle Switch */
+.toggle-group{display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none;}
+.toggle-group .toggle-label{font-size:11px;color:var(--gray-400);transition:color 0.2s;}
+.toggle-group:hover .toggle-label{color:var(--gray-200);}
+.toggle-switch{position:relative;width:34px;height:20px;flex-shrink:0;}
+.toggle-switch input{display:none;}
+.toggle-slider{
+  position:absolute;inset:0;background:rgba(255,255,255,0.06);
+  border:1px solid var(--border-subtle);border-radius:10px;
+  transition:all 0.25s ease;cursor:pointer;
+}
+.toggle-slider::after{
+  content:'';position:absolute;top:2px;left:2px;
+  width:14px;height:14px;background:var(--gray-600);
+  border-radius:50%;transition:all 0.25s ease;
+}
+.toggle-switch input:checked + .toggle-slider{
+  background:rgba(0,230,255,0.12);border-color:var(--cyan-dim);
+}
+.toggle-switch input:checked + .toggle-slider::after{
+  background:var(--cyan);transform:translateX(14px);
+  box-shadow:0 0 6px rgba(0,230,255,0.4);
+}
+.toggle-switch.rote input:checked + .toggle-slider{
+  background:rgba(16,185,129,0.12);border-color:rgba(16,185,129,0.3);
+}
+.toggle-switch.rote input:checked + .toggle-slider::after{
+  background:var(--emerald);box-shadow:0 0 6px rgba(16,185,129,0.4);
+}
+.toggle-switch.trivial input:checked + .toggle-slider{
+  background:rgba(245,158,11,0.12);border-color:rgba(245,158,11,0.3);
+}
+.toggle-switch.trivial input:checked + .toggle-slider::after{
+  background:var(--amber);box-shadow:0 0 6px rgba(245,158,11,0.4);
+}
+.detail-actions .spacer{flex:1;min-width:8px;}
+.back-btn{
+  font-size:12px;color:var(--gray-400);cursor:pointer;
+  margin-bottom:14px;display:inline-flex;align-items:center;gap:6px;
+  transition:all 0.2s;padding:4px 0;
+}
+.back-btn:hover{color:var(--cyan);gap:10px;}
+
+/* Heroicons sizing */
+.icon{width:22px;height:22px;}
+.icon-sm{width:16px;height:16px;}
+.nav-item .icon{width:18px;height:18px;flex-shrink:0;}
+.tree-toggle .icon-sm{transition:transform 0.3s ease;}
+.tree-folder-header .icon-sm{width:14px;height:14px;}
+.tag .icon-sm{width:12px;height:12px;vertical-align:middle;}
+.toggle-label .icon-sm{width:14px;height:14px;vertical-align:text-bottom;}
+
+/* ============================================
+   STATE MESSAGES
+   ============================================ */
+.loading,.error-msg,.empty{
+  text-align:center;padding:60px 20px;color:var(--gray-600);font-size:14px;
+}
+.error-msg{color:var(--coral);}
+
+/* ============================================
+   RULE BOX
+   ============================================ */
+.rule-box{
+  margin-top:14px;background:rgba(0,0,0,0.25);
+  border:1px solid var(--border-subtle);border-radius:var(--radius-md);
+  padding:16px 18px;border-left:3px solid var(--violet);
+}
+.rule-box .rule-title{
+  font-size:10px;color:var(--gray-600);text-transform:uppercase;
+  letter-spacing:0.08em;margin-bottom:6px;font-weight:600;
+}
+.rule-box .rule-body{font-size:13px;line-height:1.6;}
+.rule-box .rule-prevention{font-size:12px;color:var(--gray-400);margin-top:8px;}
+
+/* ============================================
+   ANIMATIONS
+   ============================================ */
+@keyframes fadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+@keyframes slideUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.5}}
+.stagger-1{animation:fadeIn 0.3s ease both}
+.stagger-2{animation:fadeIn 0.3s ease 0.08s both}
+.stagger-3{animation:fadeIn 0.3s ease 0.16s both}
+.stagger-4{animation:fadeIn 0.3s ease 0.24s both}
+
+/* ============================================
+   RESPONSIVE
+   ============================================ */
+@media(max-width:820px){
+  .sidebar{width:56px;}
+  .sidebar-brand span,.nav-item span{display:none;}
+  .nav-item{justify-content:center;padding:10px;}
+  .stats{grid-template-columns:repeat(2,1fr);}
+  .panels{grid-template-columns:1fr;}
+  .header input{width:120px;}
+  .content{padding:16px;}
+}
+@media(max-width:480px){
+  .stats{grid-template-columns:1fr;}
+  .sidebar{width:48px;}
+  .header{gap:8px;padding:8px 12px;}
+}
+</style>
+</head>
+<body>
+
+<!-- ============ AMBIENT BACKGROUND ============ -->
+<div class="bg-canvas">
+  <div class="bg-grid"></div>
+  <div class="bg-orb"></div>
+  <div class="bg-orb"></div>
+  <div class="bg-orb"></div>
+</div>
+
+<!-- ============ SIDEBAR ============ -->
+<aside class="sidebar">
+  <div class="sidebar-brand">
+    <h1>CODEBRAIN</h1>
+    <span>自进化错误记忆框架</span>
+  </div>
+  <nav class="sidebar-nav">
+    <div class="nav-item active" data-view="dashboard"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="icon"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z" /></svg><span>总览</span></div>
+    <div class="nav-item" data-view="browse"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="icon"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 12.75V12A2.25 2.25 0 014.5 9.75h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.061-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z" /></svg><span>分类浏览</span></div>
+    <div class="nav-item" data-view="recent"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="icon"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" /></svg><span>最近新增</span></div>
+    <div style="border-top:1px solid var(--border-subtle);margin:8px 8px;"></div>
+    <div class="nav-item" data-view="settings"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="icon"><path stroke-linecap="round" stroke-linejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.24-.438.613-.431.992a6.759 6.759 0 010 .255c-.007.378.138.75.43.99l1.005.828c.424.35.534.954.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.57 6.57 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.28c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.02-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.992a6.932 6.932 0 010-.255c.007-.378-.138-.75-.43-.99l-1.004-.828a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.087.22-.128.332-.183.582-.495.644-.869l.214-1.281z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg><span>设置</span></div>
+  </nav>
+</aside>
+
+<!-- ============ MAIN ============ -->
+<main class="main">
+  <div class="header" id="headerBar">
+    <span class="header-indicator" id="hDaemon"></span>
+    <span class="header-indicator" id="hLLM"></span>
+    <span class="header-indicator" id="hEmb"></span>
+    <span class="header-indicator" id="hStorage"></span>
+    <span style="flex:1"></span>
+    <input type="text" id="search" placeholder="搜索错误…" oninput="doSearch()">
+    <select id="statusFilter" onchange="doSearch()">
+      <option value="all">全部</option>
+      <option value="active">活跃</option>
+      <option value="suppressed">已抑制</option>
+    </select>
+  </div>
+  <div class="content" id="content">
+    <div class="loading">⟳ 加载知识库…</div>
+  </div>
+</main>
+
+<script>
+// ============================================
+// STATE
+// ============================================
+let currentView = 'dashboard';
+let currentDetail = null;
+let knowledge = [];
+let daemonInfo = {};
+let configInfo = {};
+
+// ============================================
+// API
+// ============================================
+async function api(url, opts) {
+  const r = await fetch(url, { ...opts, headers: { 'Content-Type': 'application/json', ...opts?.headers } });
+  return r.json();
+}
+
+async function loadAll() {
+  try {
+    const [kd, dd, cd] = await Promise.all([
+      api('/api/knowledge'),
+      api('/api/daemon'),
+      api('/api/config'),
+    ]);
+    knowledge = kd.data || [];
+    daemonInfo = dd;
+    configInfo = cd;
+  } catch (e) {
+    console.error('load failed', e);
+  }
+  render();
+}
+
+// ============================================
+// HEADER
+// ============================================
+function renderHeader() {
+  const d = daemonInfo || {};
+  const running = d.running;
+  document.getElementById('hDaemon').innerHTML = running
+    ? `<span class="header-dot on"></span> Daemon <span style="font-size:10px;color:var(--gray-600)">:${d.port || '?'}</span>`
+    : `<span class="header-dot off"></span> Daemon`;
+  document.getElementById('hLLM').innerHTML = `<span style="color:var(--gray-600)">LLM</span> ${configInfo?.llm?.model || '?'}`;
+  document.getElementById('hEmb').innerHTML = `<span style="color:var(--gray-600)">Emb</span> ${configInfo?.embedding?.model || '?'}`;
+  const size = formatSize(knowledge.length * 0.5 + 4);
+  document.getElementById('hStorage').innerHTML = `<span style="color:var(--gray-600)">DB</span> ${size}`;
+}
+
+// ============================================
+// FILTERS
+// ============================================
+function getFiltered() {
+  const kw = document.getElementById('search').value.toLowerCase();
+  const st = document.getElementById('statusFilter').value;
+  let data = knowledge;
+  if (st === 'suppressed') data = data.filter(k => k.solutions?.some(s => s.suppressed));
+  else if (st === 'active') data = data.filter(k => k.status === 'active');
+  if (kw) {
+    data = data.filter(k =>
+      (k.summary || '').includes(kw) ||
+      (k.groupId || '').includes(kw) ||
+      k.tags?.some(t => t.includes(kw)) ||
+      k.solutions?.some(s => (s.strategy || '').includes(kw) || (s.rootCause || '').includes(kw))
+    );
+  }
+  return data;
+}
+function doSearch() { render(); }
+
+// ============================================
+// RENDER
+// ============================================
+function render() {
+  renderHeader();
+  if (currentDetail) { renderDetail(currentDetail); return; }
+  const data = getFiltered();
+  if (currentView === 'dashboard') renderDashboard(data);
+  else if (currentView === 'browse') renderTree(data);
+  else if (currentView === 'recent') renderRecent(data);
+  else if (currentView === 'settings') renderSettings();
+}
+
+function renderDashboard(data) {
+  const total = data.reduce((s, k) => s + (k.occurrences || 0), 0);
+  const active = data.filter(k => k.status === 'active').length;
+  const suppressed = data.filter(k => k.solutions?.some(s => s.suppressed)).length;
+  const top5 = [...data].sort((a, b) => (b.occurrences || 0) - (a.occurrences || 0)).slice(0, 5);
+  const newest = [...data].sort((a, b) => (b.firstSeen || 0) - (a.firstSeen || 0)).slice(0, 5);
+
+  document.getElementById('content').innerHTML = `
+    <div class="stats">
+      <div class="stat-card stagger-1">
+        <div class="label">分组总数</div>
+        <div class="value cyan">${data.length}</div>
+        <div class="sub">${knowledge.length} 总计</div>
+      </div>
+      <div class="stat-card stagger-2">
+        <div class="label">累计命中</div>
+        <div class="value">${total}</div>
+      </div>
+      <div class="stat-card stagger-3">
+        <div class="label">活跃方案</div>
+        <div class="value emerald">${active}</div>
+      </div>
+      <div class="stat-card stagger-4">
+        <div class="label">已抑制</div>
+        <div class="value coral">${suppressed}</div>
+      </div>
+    </div>
+    <div class="panels">
+      <div class="panel">
+        <div class="panel-header">Top 高频错误</div>
+        <div class="panel-body">
+          ${top5.length ? top5.map((d, i) => `<div class="hot-item" onclick="showDetail('${d.groupId}')"><span class="hot-rank r${i+1}">${i+1}</span> ${esc(d.summary || d.groupId)}<span style="flex:1"></span>${statusIcon(d)}<span class="hot-count">${d.occurrences}次</span></div>`).join('') : '<div class="empty">暂无数据</div>'}
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel-header">最近新增</div>
+        <div class="panel-body">
+          ${newest.map(d => `<div class="hot-item" onclick="showDetail('${d.groupId}')">${esc(d.summary || d.groupId)}<span style="flex:1"></span>${statusIcon(d)}<span class="hot-date">${formatDate(d.firstSeen)}</span></div>`).join('')}
+        </div>
+      </div>
+    </div>`;
+}
+
+function renderTree(data) {
+  const root = { name: '', children: new Map(), items: [] };
+  for (const d of data) {
+    const p = (d.category || 'other').split('/');
+    let n = root;
+    for (const s of p) { if (!n.children.has(s)) n.children.set(s, { name: s, children: new Map(), items: [] }); n = n.children.get(s); }
+    n.items.push(d);
+  }
+  function renderNode(node, path, depth) {
+    let h = '';
+    for (const d of node.items) {
+      const sup = d.solutions?.some(s => s.suppressed);
+      h += `<div class="tree-item"><span class="tree-icon" ${sup ? 'style="opacity:.4"' : ''}>${icon(sup ? 'doc' : 'docText')}</span> <span onclick="showDetail('${d.groupId}')">${esc(d.summary || d.groupId)}</span><span style="flex:1"></span>${statusIcon(d)}<span class="tree-count">${d.occurrences}次</span></div>`;
+    }
+    for (const [, child] of node.children) {
+      const total = countItems(child);
+      const cp = path ? path + '/' + child.name : child.name;
+      const cls = depth === 0 ? 'tree-folder-bordered' : 'tree-folder-bordered tree-folder-nested';
+      h += `<div class="${cls}"><div class="tree-folder-header" onclick="toggleNode('${cp}')"><span class="tree-toggle" id="toggle-${cp}">${icon('chevronRight')}</span> <span style="color:var(--cyan);font-weight:500;font-size:12px">${esc(child.name)}/</span><span style="flex:1"></span><span class="tree-count">${total}</span></div><div class="tree-children collapsed" id="children-${cp}">${renderNode(child, cp, depth + 1)}</div></div>`;
+    }
+    return h;
+  }
+  function countItems(node) { let n = node.items.length; for (const [, c] of node.children) n += countItems(c); return n; }
+  const html = renderNode(root, '', 0);
+  document.getElementById('content').innerHTML = html ? `<div class="tree">${html}</div>` : '<div class="empty">暂无数据</div>';
+}
+
+function renderRecent(data) {
+  const sorted = [...data].sort((a, b) => (b.lastSeen || 0) - (a.lastSeen || 0));
+  document.getElementById('content').innerHTML = `
+    <div class="panel" style="max-width:700px">
+      <div class="panel-header">按最近活跃排序</div>
+      <div class="panel-body">
+        ${sorted.length ? sorted.map(d => `<div class="hot-item" onclick="showDetail('${d.groupId}')">${esc(d.summary || d.groupId)}<span style="flex:1"></span>${statusIcon(d)}<span class="hot-count">${d.occurrences}次</span><span class="hot-date" style="margin-left:8px">${formatDate(d.lastSeen)}</span></div>`).join('') : '<div class="empty">暂无数据</div>'}
+      </div>
+    </div>`;
+}
+
+function renderSettings() {
+  const d = daemonInfo || {};
+  const cfg = configInfo || {};
+  const dot = d.running ? '<span class="header-dot on"></span>' : '<span class="header-dot off"></span>';
+  const adaptersList = [
+    {id:'claude-code', label:'Claude Code', installed:true},
+    {id:'codex', label:'OpenAI Codex CLI', installed:false},
+    {id:'gemini', label:'Gemini CLI', installed:false},
+    {id:'copilot', label:'GitHub Copilot', installed:false},
+  ];
+  document.getElementById('content').innerHTML = `
+    <div style="max-width:640px;animation:fadeIn 0.3s ease">
+      <div class="panel" style="margin-bottom:14px">
+        <div class="panel-header">Daemon 状态</div>
+        <div style="padding:16px 18px;display:flex;align-items:center;gap:8px;font-size:14px">
+          ${dot} <span style="font-weight:600">${d.running ? '运行中' : '已停止'}</span>
+          <span style="flex:1"></span>
+          ${d.running ? `<span style="font-size:11px;color:var(--gray-600);font-family:var(--font-mono)">PID ${d.pid} · port ${d.port} · ${Math.floor(d.uptime || 0)}s</span>` : ''}
+        </div>
+      </div>
+      <div class="panel" style="margin-bottom:14px">
+        <div class="panel-header">LLM 配置</div>
+        <div class="setting-rows">
+          <div class="setting-row"><span>Provider</span><span style="color:var(--gray-200)">${cfg.llm?.provider || '?'}</span></div>
+          <div class="setting-row"><span>模型</span><span style="color:var(--gray-200)">${cfg.llm?.model || '?'}</span></div>
+          <div class="setting-row"><span>API 地址</span><span style="font-size:12px;color:var(--gray-400)">${cfg.llm?.baseUrl || '-'}</span></div>
+        </div>
+      </div>
+      <div class="panel" style="margin-bottom:14px">
+        <div class="panel-header">Embedding</div>
+        <div class="setting-rows">
+          <div class="setting-row"><span>Provider</span><span style="color:var(--gray-200)">${cfg.embedding?.provider || '?'}</span></div>
+          <div class="setting-row"><span>模型</span><span style="color:var(--gray-200)">${cfg.embedding?.model || '?'}</span></div>
+        </div>
+      </div>
+      <div class="panel" style="margin-bottom:14px">
+        <div class="panel-header">Agent 适配器</div>
+        <div class="setting-rows">
+          ${adaptersList.map(a => {
+            const enabled = cfg.adapters && cfg.adapters[a.id];
+            return `<div class="setting-row"><span>${a.label}</span>
+              <span style="display:flex;align-items:center;gap:8px">
+                ${a.installed ? '<span style="font-size:10px;color:var(--emerald)">已安装</span>' : '<span style="font-size:10px;color:var(--gray-600)">未安装</span>'}
+                <label class="toggle-switch" ${!a.installed ? 'style="opacity:.3;pointer-events:none"' : ''}>
+                  <input type="checkbox" ${enabled && a.installed ? 'checked' : ''} ${!a.installed ? 'disabled' : ''}>
+                  <span class="toggle-slider"></span>
+                </label>
+              </span>
+            </div>`;
+          }).join('')}
+        </div>
+      </div>
+    </div>`;
+}
+
+function renderDetail(id) {
+  const d = knowledge.find(x => x.groupId === id);
+  if (!d) { document.getElementById('content').innerHTML = '<div class="error-msg">未找到该条目</div>'; return; }
+
+  const solHtml = (d.solutions || []).map((s, i) => {
+    const badge = s.suppressed
+      ? '<span class="solution-badge suppress">已抑制</span>'
+      : (s.verifiedCount || 0) >= 5
+        ? '<span class="solution-badge ok">✓ v' + s.verifiedCount + '</span>'
+        : '<span class="solution-badge warn">v' + (s.verifiedCount || 0) + '</span>';
+    return `<div class="solution">
+      <div class="solution-header">${badge}<span>方案 ${i+1}</span></div>
+      <div class="solution-field"><span class="key">fix</span> ${esc(s.strategy)}</div>
+      <div class="solution-field"><span class="key">root</span> ${esc(s.rootCause)}</div>
+      <div class="solution-field"><span class="key">avoid</span> ${esc(s.avoidanceHint)}</div>
+      ${s.executionTrace ? `<div class="trace">▸ ${esc(s.executionTrace.command)} · exit ${s.executionTrace.exitCode} · ${formatDate(s.executionTrace.timestamp)}</div>` : ''}
+    </div>`;
+  }).join('');
+
+  const depsHtml = d.dependencyVersions && Object.keys(d.dependencyVersions).length
+    ? `<div style="font-size:11px;color:var(--gray-600);margin-top:12px"><span style="color:var(--gray-600)">依赖版本</span> ${Object.entries(d.dependencyVersions).map(([k, v]) => k + '@' + v).join(', ')}</div>`
+    : '';
+
+  const ruleHtml = d.abstractRule ? `
+    <div class="rule-box">
+      <div class="rule-title">抽象规则</div>
+      <div class="rule-body">${esc(d.abstractRule)}</div>
+      ${d.preventionAdvice ? `<div class="rule-prevention">▸ 预防: ${esc(d.preventionAdvice)}</div>` : ''}
+    </div>` : '';
+
+  const hasSuppressed = d.solutions?.some(s => s.suppressed);
+
+  document.getElementById('content').innerHTML = `
+    <div class="detail-view">
+      <span class="back-btn" onclick="showDetail(null)">← 返回列表</span>
+      <div class="detail-card">
+        <h2>${esc(d.summary || d.groupId)}
+          ${d.isRote ? '<span class="tag tag-rote" style="vertical-align:middle;margin-left:8px">' + icon('star') + ' 常见</span>' : ''}
+          ${d.isTrivial ? '<span class="tag tag-trivial" style="vertical-align:middle;margin-left:4px">' + icon('bolt') + ' 简单</span>' : ''}
+        </h2>
+        <div class="detail-meta">
+          <span>${esc(d.groupId)}</span>
+          <span style="color:var(--gray-600)">${esc(d.category || 'other')}</span>
+          <span style="font-family:var(--font-mono);font-size:11px">${d.occurrences} 次</span>
+          <span class="tag">${d.status}</span>
+          ${(d.tags || []).map(t => `<span class="tag">${esc(t)}</span>`).join('')}
+        </div>
+        <div class="detail-error-template">${esc(d.errorTemplate || '')}</div>
+        ${solHtml}
+        ${depsHtml}
+        ${ruleHtml}
+        <div class="detail-actions">
+          <label class="toggle-group" title="标记为已熟知模式，引擎不再深入提取">
+            <span class="toggle-label">${icon('star')} 常见</span>
+            <span class="toggle-switch rote">
+              <input type="checkbox" ${d.isRote ? 'checked' : ''} onchange="toggleRote('${d.groupId}', this.checked)">
+              <span class="toggle-slider"></span>
+            </span>
+          </label>
+          <label class="toggle-group" title="标记为琐碎错误，不注入修复内容">
+            <span class="toggle-label">${icon('bolt')} 简单</span>
+            <span class="toggle-switch trivial">
+              <input type="checkbox" ${d.isTrivial ? 'checked' : ''} onchange="toggleTrivial('${d.groupId}', this.checked)">
+              <span class="toggle-slider"></span>
+            </span>
+          </label>
+          <span class="spacer"></span>
+          <button onclick="toggleSuppress('${d.groupId}', ${!hasSuppressed})" class="warn" title="抑制后不再注入到 Agent 会话">${hasSuppressed ? '解除抑制' : '抑制'}</button>
+          <button onclick="deleteKnowledge('${d.groupId}')" class="danger" title="永久删除，不可恢复">删除</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+// ============================================
+// ACTIONS
+// ============================================
+async function toggleSuppress(groupId, suppressed) {
+  try {
+    await api('/api/knowledge/suppress', { method: 'POST', body: JSON.stringify({ groupId, suppressed }) });
+    const k = knowledge.find(x => x.groupId === groupId);
+    if (k) { (k.solutions || []).forEach(s => s.suppressed = suppressed); k.status = suppressed ? 'deprecated' : 'active'; }
+    render();
+  } catch (e) { alert('操作失败: ' + e.message); }
+}
+async function toggleRote(groupId, isRote) {
+  try {
+    await api('/api/knowledge/rote', { method: 'POST', body: JSON.stringify({ groupId, isRote }) });
+    const k = knowledge.find(x => x.groupId === groupId);
+    if (k) k.isRote = isRote;
+    render();
+  } catch (e) { alert('操作失败: ' + e.message); }
+}
+async function toggleTrivial(groupId, isTrivial) {
+  try {
+    await api('/api/knowledge/trivial', { method: 'POST', body: JSON.stringify({ groupId, isTrivial }) });
+    const k = knowledge.find(x => x.groupId === groupId);
+    if (k) k.isTrivial = isTrivial;
+    render();
+  } catch (e) { alert('操作失败: ' + e.message); }
+}
+async function deleteKnowledge(groupId) {
+  if (!confirm('确定删除 ' + groupId + '？不可恢复。')) return;
+  try {
+    await api('/api/knowledge/delete', { method: 'POST', body: JSON.stringify({ groupId }) });
+    knowledge = knowledge.filter(x => x.groupId !== groupId);
+    currentDetail = null;
+    render();
+  } catch (e) { alert('删除失败: ' + e.message); }
+}
+
+function showDetail(id) { currentDetail = id; render(); }
+function toggleNode(path) {
+  const c = document.getElementById('children-' + path);
+  const t = document.getElementById('toggle-' + path);
+  if (!c || !t) return;
+  const isOpen = !c.classList.contains('collapsed');
+  c.classList.toggle('collapsed');
+  t.innerHTML = icon(isOpen ? 'chevronRight' : 'chevronDown');
+}
+
+// ============================================
+// HEROICONS — SVG icon helper
+// ============================================
+const ICONS = {
+  // outline 24
+  dashboard: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="icon"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z" /></svg>',
+  folder: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="icon"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 12.75V12A2.25 2.25 0 014.5 9.75h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.061-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z" /></svg>',
+  clock: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="icon"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>',
+  // mini 20
+  chevronRight: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="icon-sm"><path fill-rule="evenodd" d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z" clip-rule="evenodd" /></svg>',
+  chevronDown: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="icon-sm"><path fill-rule="evenodd" d="M12.53 16.28a.75.75 0 01-1.06 0l-7.5-7.5a.75.75 0 011.06-1.06L12 14.69l6.97-6.97a.75.75 0 111.06 1.06l-7.5 7.5z" clip-rule="evenodd" /></svg>',
+  docText: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="icon-sm"><path fill-rule="evenodd" d="M4.5 2A1.5 1.5 0 003 3.5v13A1.5 1.5 0 004.5 18h11a1.5 1.5 0 001.5-1.5V7.621a1.5 1.5 0 00-.44-1.06l-4.12-4.122A1.5 1.5 0 0011.378 2H4.5zm2.25 8.5a.75.75 0 000 1.5h6.5a.75.75 0 000-1.5h-6.5zm0 3a.75.75 0 000 1.5h6.5a.75.75 0 000-1.5h-6.5z" clip-rule="evenodd" /></svg>',
+  doc: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="icon-sm"><path d="M3 3.5A1.5 1.5 0 014.5 2h6.879a1.5 1.5 0 011.06.44l4.122 4.12A1.5 1.5 0 0117 7.622V16.5a1.5 1.5 0 01-1.5 1.5h-11A1.5 1.5 0 013 16.5v-13z" /></svg>',
+  star: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="icon-sm"><path fill-rule="evenodd" d="M10.868 2.884c-.321-.772-1.415-.772-1.736 0l-1.83 4.401-4.753.381c-.833.067-1.171 1.107-.536 1.651l3.62 3.102-1.106 4.637c-.194.813.691 1.456 1.405 1.02L10 15.591l4.068 2.485c.714.436 1.599-.207 1.404-1.02l-1.106-4.637 3.62-3.102c.635-.544.297-1.584-.536-1.65l-4.752-.382-1.831-4.401z" clip-rule="evenodd" /></svg>',
+  bolt: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="icon-sm"><path d="M11.983 1.907a.75.75 0 00-1.292-.657l-8.5 9.5A.75.75 0 002.75 12h5.572l-1.305 6.093a.75.75 0 001.292.657l8.5-9.5A.75.75 0 0015.25 8H9.678l1.305-6.093z" /></svg>',
+};
+function icon(name, cls = '') { return ICONS[name] ? ICONS[name].replace('class="icon"', 'class="icon ' + cls + '"').replace('class="icon-sm"', 'class="icon-sm ' + cls + '"') : ''; }
+
+// ============================================
+// UTILS
+// ============================================
+function esc(s) { return (s || '').replace(/[&<>"']/g, function(m) { return ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' })[m]; }); }
+function formatDate(ts) { return ts ? new Date(ts).toLocaleDateString('zh-CN') : '-'; }
+function formatSize(kb) { return kb < 1024 ? kb.toFixed(0) + 'KB' : (kb/1024).toFixed(1) + 'MB'; }
+function statusIcon(d) {
+  return (d.isRote ? '<span style="color:var(--emerald);margin-left:3px">' + icon('star') + '</span>' : '')
+       + (d.isTrivial ? '<span style="color:var(--amber);margin-left:2px">' + icon('bolt') + '</span>' : '');
+}
+
+// ============================================
+// NAV
+// ============================================
+document.querySelectorAll('.nav-item').forEach(el => {
+  el.addEventListener('click', () => {
+    document.querySelectorAll('.nav-item').forEach(e => e.classList.remove('active'));
+    el.classList.add('active');
+    currentView = el.dataset.view;
+    currentDetail = null;
+    render();
+  });
+});
+
+// ============================================
+// INIT
+// ============================================
+loadAll();
+setInterval(loadAll, 30000);
+</script>
+</body>
+</html>
