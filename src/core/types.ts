@@ -124,6 +124,8 @@ export interface PendingError {
   command?: string;
   groupId?: string;
   timestamp: number;
+  /** 追踪错误生命周期：error → pending → resolve */
+  eventId?: string;
 }
 
 export interface StorageStats {

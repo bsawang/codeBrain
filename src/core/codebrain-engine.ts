@@ -78,13 +78,13 @@ export class CodeBrainEngine {
     logger.info('engine', `initialized groups=${this.index.size}`);
   }
 
-  async onError(event: ErrorEvent): Promise<string | null> {
+  async onError(event: ErrorEvent, eventId?: string): Promise<string | null> {
     this.injectionHistory = this.injectionHistory.filter(
       (r) => this.turnCounter - r.turnIndex < ANTI_LOOP_WINDOW,
     );
     const match = await this.matcher.matchSync(event, this.index);
     if (!match) {
-      this.pendingQueue.push({ normalized: event.normalized, sourceFile: event.sourceFile, errorCode: event.errorCode, command: event.command, timestamp: event.timestamp });
+      this.pendingQueue.push({ normalized: event.normalized, sourceFile: event.sourceFile, errorCode: event.errorCode, command: event.command, timestamp: event.timestamp, eventId });
       return null;
     }
 
@@ -98,17 +98,17 @@ export class CodeBrainEngine {
     }
 
     if (match.matched.isTrivial) {
-      this.pendingQueue.push({ normalized: event.normalized, sourceFile: event.sourceFile, errorCode: event.errorCode, command: event.command, timestamp: event.timestamp, groupId: match.groupId });
+      this.pendingQueue.push({ normalized: event.normalized, sourceFile: event.sourceFile, errorCode: event.errorCode, command: event.command, timestamp: event.timestamp, groupId: match.groupId, eventId });
       return null;
     }
 
-    this.pendingQueue.push({ normalized: event.normalized, sourceFile: event.sourceFile, errorCode: event.errorCode, command: event.command, timestamp: event.timestamp, groupId: match.groupId });
+    this.pendingQueue.push({ normalized: event.normalized, sourceFile: event.sourceFile, errorCode: event.errorCode, command: event.command, timestamp: event.timestamp, groupId: match.groupId, eventId });
     return this.formatInjection(match, groupHits >= 1);
   }
 
-  async onSuccess(command: string, exitCode: number): Promise<void> {
+  async onSuccess(command: string, exitCode: number): Promise<string[]> {
     this.turnCounter++;
-    if (exitCode !== 0) return;
+    if (exitCode !== 0) return [];
     const resolved = [...this.pendingQueue]; this.pendingQueue = [];
     for (const pending of resolved) {
       if (pending.groupId) {
@@ -118,6 +118,7 @@ export class CodeBrainEngine {
         this.stage2ExtractSolution(ev, { error: ev, fixTimestamp: Date.now() });
       }
     }
+    return resolved.map((p) => p.eventId).filter((id): id is string => !!id);
   }
 
   async onFixDetected(fix: FixInfo): Promise<void> {
@@ -199,6 +200,9 @@ export class CodeBrainEngine {
       await this.storage.upsert(existing);
       this.index.addTextKey(existing.groupId, event.normalized);
 
+      const solCount = existing.solutions.filter((s) => s.strategy && s.rootCause).length;
+      logger.info('engine', ` knowledge ${existing.groupId} ${existing.occurrences}次 ${solCount}方案 "${existing.summary?.slice(0, 40)}"`);
+
       const validSolutions = existing.solutions.filter((s) => s.strategy && s.rootCause);
       const totalVerified = validSolutions.reduce((sum, s) => sum + s.verifiedCount, 0);
       if (totalVerified >= 3 && !existing.abstractRule) {
@@ -245,6 +249,7 @@ export class CodeBrainEngine {
     if (top) { top.verifiedCount++; top.suppressed = false; }
     knowledge.occurrences++; knowledge.lastSeen = Date.now();
     this.storage.upsert(knowledge);
+    logger.info('engine', ` verify ${groupId} ${knowledge.occurrences}次 cmd="${command.slice(0, 40)}"`);
     if (knowledge.isRote) return;
     if (knowledge.abstractRule) return;
     const solutions = knowledge.solutions.filter((s) => s.strategy && s.rootCause);

@@ -16,6 +16,14 @@ export interface AgentAdapter {
 
   /** 注入知识到 Agent 上下文 */
   injectOnError(error: ErrorEvent, matched: ErrorKnowledge): string;
+
+  /**
+   * 判断输出+退出码是否表示错误。
+   * 每个 adapter 按自己对协议的理解来实现：
+   *   - Claude Code：exit code 不可靠，用关键词检测
+   *   - Codex：可能直用真实 shell exit code
+   */
+  isError(output: string, exitCode: number): boolean;
 }
 
 /**

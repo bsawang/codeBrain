@@ -1,4 +1,5 @@
 import { createServer, IncomingMessage, ServerResponse } from 'http';
+import { randomUUID } from 'crypto';
 import { CodeBrainEngine } from '../core/codebrain-engine';
 import { StorageEngine } from '../storage/storage-engine';
 import { XenovaEmbeddingProvider } from '../providers/xenova-embedding';
@@ -57,17 +58,20 @@ async function handleHook(req: HookRequest): Promise<HookResponse> {
   const output = req.output || '';
   const command = req.command || '';
   const exitCode = req.exitCode || 0;
-  logger.info('daemon', `hook cmd="${command.slice(0, 80)}" exit=${exitCode}`);
+  const eventId = randomUUID().slice(0, 8);  // 短 ID 便于阅读
 
-  if (!output && exitCode === 0) { await eng.onSuccess(command, exitCode); return { injected: null }; }
-
-  const isError = exitCode !== 0 ||
-    /Error:|error:|TypeError|ReferenceError|SyntaxError|Cannot find|FAIL|stack trace/i.test(output);
-
-  if (!isError) { await eng.onSuccess(command, exitCode); return { injected: null }; }
+  if (!adapter!.isError(output, exitCode)) {
+    const eids = await eng.onSuccess(command, exitCode);
+    if (eids.length > 0) {
+      logger.info('daemon', `[hook][resolve][${eids.join(',')}] cmd="${command.slice(0, 80)}" exit=${exitCode}`);
+    }
+    return { injected: null };
+  }
 
   const event = createErrorEvent(output, { command, os: req.os || process.platform, sourceFile: extractSourceFile(output), sessionId: req.sessionId });
-  const injection = await eng.onError(event);
+  const injection = await eng.onError(event, eventId);
+  const evType = injection ? 'error_match' : 'error_miss';
+  logger.info('daemon', `[hook][${evType}][${eventId}] cmd="${command.slice(0, 80)}" exit=${exitCode}`);
   return { injected: injection };
 }
 

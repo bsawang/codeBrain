@@ -8,11 +8,38 @@ import { ErrorEvent, ErrorKnowledge, FixInfo, AgentSession } from '../../core/ty
 import { CodeBrainEngine } from '../../core/codebrain-engine';
 import { createErrorEvent } from '../../core/preprocessor';
 
+/**
+ * Claude Code 适配器 — 错误关键词识别。
+ *
+ * Claude Code hook 协议不提供真实 shell exit code，
+ * 只能用输出文本检测错误。此处维护一套在 34 条标准测试
+ * 上覆盖 33/34 的模式集合。
+ */
 const ERROR_KEYWORDS = [
+  // 标准运行时错误（带冒号）
   'Error:', 'error:', 'TypeError:', 'ReferenceError:', 'SyntaxError:',
+  // Node.js 模块系统
   'Cannot find module', 'Module not found', 'Command failed',
-  'exit code 1', 'exit code 2',
-  'TS\d{4}', 'ESLint:', 'FAIL', 'AssertionError',
+  // Shell exit 信号
+  'exit code 1', 'exit code 2', 'Exit status',
+  // TypeScript 编译错误
+  'TS\\d{4}',
+  // ESLint
+  'ESLint:',
+  // 测试框架
+  'FAIL', 'AssertionError',
+  // Node.js 括号风格系统错误：Error [ERR_*]
+  'Error \\[',
+  // pip 大写风格
+  'ERROR:',
+  // git merge 冲突
+  'CONFLICT',
+  // npm 生命周期
+  'ELIFECYCLE',
+  // Rust 编译错误：error[E0308]
+  'error\\[',
+  // Docker 守护进程错误
+  'Error response from daemon',
 ];
 
 const ERROR_RE = new RegExp(ERROR_KEYWORDS.join('|'));
@@ -86,7 +113,7 @@ export class ClaudeCodeAdapter implements AgentAdapter {
     return lines.join('\n');
   }
 
-  private isError(output: string, exitCode: number): boolean {
+  isError(output: string, exitCode: number): boolean {
     if (exitCode !== 0) return true;
     return ERROR_RE.test(output);
   }

@@ -22,9 +22,15 @@ function logPath(): string {
   return _logPath;
 }
 
+function localTS(): string {
+  const d = new Date();
+  const pad2 = (n: number) => String(n).padStart(2, '0');
+  const pad3 = (n: number) => String(n).padStart(3, '0');
+  return `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}.${pad3(d.getMilliseconds())}`;
+}
+
 function format(level: Level, module: string, msg: string): string {
-  const ts = new Date().toISOString();
-  return `[${ts}] [${level.padEnd(5)}] [${module}] ${msg}\n`;
+  return `[${localTS()}][${level}][${module}]${msg}\n`;
 }
 
 function rotate(path: string): void {
@@ -34,7 +40,7 @@ function rotate(path: string): void {
     if (lines.length <= KEEP_LINES) return;
 
     const kept = lines.slice(-KEEP_LINES).join('\n');
-    writeFileSync(path, `... (truncated at ${new Date().toISOString()})\n${kept}`, 'utf-8');
+    writeFileSync(path, `... (truncated at ${localTS()})\n${kept}`, 'utf-8');
   } catch {
     // 轮转失败不影响写入
   }
