@@ -9,7 +9,7 @@
  * 使用 for-await-of 等待 EOF 会造成死锁。
  */
 import { spawn } from 'child_process';
-import { readFileSync } from 'fs';
+import { readFileSync, unlinkSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 
@@ -25,25 +25,35 @@ function getDaemonPort(): number | null {
 }
 
 async function ensureDaemon(): Promise<number> {
-  let port = getDaemonPort();
-  if (port) return port;
+  // 1. 如果有已知端口，先验证 daemon 是否存活
+  const knownPort = getDaemonPort();
+  if (knownPort) {
+    try {
+      const resp = await fetch(`http://127.0.0.1:${knownPort}/health`);
+      if (resp.ok) return knownPort;
+    } catch {
+      // daemon 不存活，继续重启流程
+    }
+    process.stderr.write('[codebrain] daemon not responding, restarting...\n');
+    try { unlinkSync(PID_FILE); } catch { /* 清理陈旧 PID 文件 */ }
+  }
 
-  // 启动 daemon
+  // 2. 启动 daemon
   const cliScript = __filename.replace(/adapters[\/\\]claude-code[\/\\]hook\.js$/, 'cli/index.js');
   spawn('node', [cliScript, 'daemon', 'start'], {
     detached: true,
     stdio: 'ignore',
   }).unref();
 
-  // 等待就绪（最多 8 秒）
+  // 3. 等待就绪（最多 8 秒）
   const start = Date.now();
   while (Date.now() - start < DAEMON_START_TIMEOUT) {
     await new Promise((r) => setTimeout(r, 200));
-    port = getDaemonPort();
+    const port = getDaemonPort();
     if (port) return port;
   }
 
-  throw new Error('Daemon start timeout');
+  throw new Error('[codebrain] daemon start timeout');
 }
 
 async function callDaemon(port: number, body: Record<string, unknown>): Promise<{ injected: string | null }> {
@@ -106,7 +116,7 @@ function readStdin(): Promise<string> {
   });
 }
 
-async function main(): Promise<void> {
+export async function main(): Promise<void> {
   const empty = JSON.stringify({ continue: true });
 
   const input = await readStdin();
@@ -157,4 +167,7 @@ async function main(): Promise<void> {
   }
 }
 
-main();
+// 直接执行时自动运行，被 import/require 时不自动执行
+if (typeof require !== 'undefined' && require.main === module) {
+  main();
+}

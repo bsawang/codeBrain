@@ -345,8 +345,14 @@ if (command === '/?' || command === '--help' || command === '-h') {
 
       case 'hook': {
         const sub = args[1];
+        // codebrain hook run → 直接执行 hook relay（被 Claude Code 子进程调用）
+        if (sub === 'run') {
+          const { main: runHook } = require('../adapters/claude-code/hook.js');
+          await runHook();
+          break;
+        }
         const agent = args[2];
-        if (!sub || !agent) { console.log('用法: codebrain hook <register|unregister> <agent>'); break; }
+        if (!sub || !agent) { console.log('用法: codebrain hook <register|unregister|run> [agent]'); break; }
         if (agent === 'claude-code') {
           const { register, unregister } = require('../adapters/claude-code/register.js');
           sub === 'register' ? register() : unregister();

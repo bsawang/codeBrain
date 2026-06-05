@@ -11,7 +11,6 @@ import { homedir } from 'os';
 
 const CLAUDE_HOME = join(homedir(), '.claude');
 const SETTINGS_PATH = join(CLAUDE_HOME, 'settings.json');
-const HOOK_SCRIPT = join(__dirname, 'hook.js');
 
 interface HookEntry {
   type: 'command';
@@ -28,7 +27,7 @@ interface ClaudeSettings {
   [key: string]: unknown;
 }
 
-const CODEBRAIN_HOOK_COMMAND = `node "${HOOK_SCRIPT}"`;
+const CODEBRAIN_HOOK_COMMAND = 'codebrain hook run';
 
 function isCodebrainHook(entry: HookEntry): boolean {
   return entry.type === 'command' && entry.command.toLowerCase().includes('codebrain');
