@@ -30,6 +30,10 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Install webui dependencies
+        run: npm ci
+        working-directory: webui
+
       - name: Build
         run: npm run build
 
